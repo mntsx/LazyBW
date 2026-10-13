@@ -1,0 +1,462 @@
+// Package config handles the LazyBW JSON/JSONC configuration files.
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+type Authentication struct {
+	ClientEnvPath string `json:"client_env_path"`
+	DefaultServer string `json:"default_server"`
+}
+type Local struct {
+	SaveVault       bool   `json:"save_vault"`
+	VaultPath       string `json:"vault_path"`
+	VaultEncryption string `json:"vault_encryption"`
+}
+type Network struct {
+	USPingURL string `json:"us_ping_url"`
+	EUPingURL string `json:"eu_ping_url"`
+}
+type Config struct {
+	Authentication Authentication                 `json:"authentication"`
+	Local          Local                          `json:"local_replication"`
+	Network        Network                        `json:"network"`
+	Colors         map[string]string              `json:"colors"`
+	Keybinds       map[string]map[string][]string `json:"-"`
+	Directory      string                         `json:"-"`
+}
+
+// DefaultColors contains both terminal palette overrides and UI-specific roles.
+// Values accept ANSI names, #RRGGBB, and 256-color palette indices.
+var DefaultColors = map[string]string{
+	"background": "transparent",
+	"surface":    "ansi_black 35%", "panel": "transparent",
+	"foreground": "ansi_white", "muted": "ansi_bright_black",
+	"primary": "ansi_bright_blue", "primary_text": "ansi_bright_blue",
+	"accent": "ansi_blue", "info": "ansi_bright_cyan",
+	"selection": "ansi_black", "selection_text": "ansi_white",
+	"auth_tip_background": "ansi_black", "auth_tip_text": "ansi_white",
+	"hover": "ansi_bright_black 12%", "border": "ansi_blue",
+	"border_focus": "ansi_bright_blue", "error": "ansi_bright_red",
+	"warning": "ansi_bright_cyan", "success": "ansi_bright_green",
+	"button": "ansi_bright_black 8%", "button_hover": "ansi_bright_black 28%",
+	"title_background": "#0c1634", "find_background": "#222427",
+	"black": "ansi_black", "red": "ansi_red", "green": "ansi_green",
+	"yellow": "ansi_yellow", "blue": "ansi_blue", "magenta": "ansi_magenta",
+	"cyan": "ansi_cyan", "white": "ansi_white",
+	"bright_black": "ansi_bright_black", "bright_red": "ansi_bright_red",
+	"bright_green": "ansi_bright_green", "bright_yellow": "ansi_bright_yellow",
+	"bright_blue": "ansi_bright_blue", "bright_magenta": "ansi_bright_magenta",
+	"bright_cyan": "ansi_bright_cyan", "bright_white": "ansi_bright_white",
+	"hint_key": "ansi256:250", "hint_action": "ansi256:244",
+	"subtitle": "ansi256:249",
+}
+
+// A list is ordered: its first key is displayed in footer hints.
+// Existing JSONC files containing one string per action remain supported.
+var DefaultKeybinds = map[string]map[string][]string{
+	"global": {
+		"quit": {"ctrl+q"}, "sync": {"ctrl+s"},
+		"push_all":       {"ctrl+p"},
+		"discard_all":    {"ctrl+d"},
+		"focus_my_vault": {"1"}, "focus_item_types": {"2"},
+		"focus_folders": {"3"}, "focus_changes": {"4"},
+		"focus_items": {"5"}, "focus_content": {"6"},
+		"hint_next_page": {"?"},
+	},
+	"authentication": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
+		"submit": {"enter"}, "reveal_secret": {"ctrl+r"},
+		"server": {"ctrl+s"}, "quit": {"ctrl+q"},
+	},
+	"master_password": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
+		"submit": {"enter"}, "reveal_password": {"ctrl+r"},
+		"server": {"ctrl+s"}, "quit": {"ctrl+q"},
+	},
+	"authentication_offline": {
+		"button_left": {"left"}, "button_right": {"right"},
+		"submit": {"enter"}, "server": {"ctrl+s"}, "quit": {"ctrl+q"},
+	},
+	"server_picker": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"filters": {
+		"next": {"down"}, "previous": {"up"},
+		"select": {"enter"}, "return_to_items": {"escape", "left"},
+	},
+	"folders": {
+		"next": {"down"}, "previous": {"up"}, "select": {"enter"},
+		"new": {"n"}, "delete": {"d"}, "return_to_items": {"left"},
+	},
+	"items": {
+		"next": {"down"}, "previous": {"up"},
+		"open": {"right", "enter"}, "search": {"f"},
+		"delete": {"d"}, "new": {"n"},
+	},
+	"search": {
+		"leave": {"escape"}, "apply": {"enter"},
+	},
+	"edits": {
+		"save": {"s", "enter"}, "discard": {"d"},
+		"next": {"down"}, "previous": {"up"},
+	},
+	"content": {
+		"next": {"down"}, "previous": {"up"}, "back": {"left"},
+		"new_field": {"n"}, "delete_field": {"d"},
+		"copy": {"c"}, "reveal": {"r"},
+		"edit":     {"e", "right", "enter"},
+		"switch":   {"s", "right", "enter"},
+		"favorite": {"f"},
+	},
+	"detail": {
+		"back": {"escape"}, "save": {"enter"},
+		"newline": {"ctrl+enter"}, "reveal": {"ctrl+r"},
+	},
+	"popup": {
+		"cancel": {"escape"}, "next": {"down"},
+		"previous": {"up"}, "button_left": {"left"},
+		"button_right": {"right"}, "confirm": {"enter"},
+	},
+	"confirmation_popup": {
+		"confirm": {"enter"}, "cancel": {"escape", "c"},
+		"accept": {"y"}, "reject": {"n"},
+		"button_left": {"left"}, "button_right": {"right"},
+	},
+	"sync_popup": {
+		"soft_sync": {"s"}, "hard_sync": {"h"},
+		"abort": {"a", "escape"}, "confirm": {"enter"},
+		"button_left": {"left"}, "button_right": {"right"},
+		"next_page": {"?"},
+	},
+	"create_item_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"create_field_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"linked_field_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"folder_selector_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"switch": {"s"}, "confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"card_brand_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"identity_title_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"website_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"reprompt_popup": {"confirm": {"enter"}, "cancel": {"escape"},
+		"reveal_password": {"ctrl+r"}},
+	"name_popup":   {"confirm": {"enter"}, "cancel": {"escape"}},
+	"folder_popup": {"confirm": {"enter"}, "cancel": {"escape"}},
+}
+
+// NormalizeJSONC strips comments and trailing commas outside quoted strings.
+func NormalizeJSONC(src []byte) ([]byte, error) {
+	out := append([]byte(nil), src...)
+	inString, escaped := false, false
+	for i := 0; i < len(out); i++ {
+		if inString {
+			if escaped {
+				escaped = false
+			} else if out[i] == '\\' {
+				escaped = true
+			} else if out[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if out[i] == '"' {
+			inString = true
+			continue
+		}
+		if out[i] == '/' && i+1 < len(out) && out[i+1] == '/' {
+			for i < len(out) && out[i] != '\n' && out[i] != '\r' {
+				out[i] = ' '
+				i++
+			}
+			continue
+		}
+		if out[i] == '/' && i+1 < len(out) && out[i+1] == '*' {
+			j := i + 2
+			for j+1 < len(out) && !(out[j] == '*' && out[j+1] == '/') {
+				j++
+			}
+			if j+1 >= len(out) {
+				return nil, errors.New("unterminated JSONC block comment")
+			}
+			for k := i; k < j+2; k++ {
+				if out[k] != '\n' && out[k] != '\r' {
+					out[k] = ' '
+				}
+			}
+			i = j + 1
+		}
+	}
+	inString = false
+	escaped = false
+	for i := 0; i < len(out); i++ {
+		if inString {
+			if escaped {
+				escaped = false
+			} else if out[i] == '\\' {
+				escaped = true
+			} else if out[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if out[i] == '"' {
+			inString = true
+			continue
+		}
+		if out[i] == ',' {
+			j := i + 1
+			for j < len(out) && (out[j] == ' ' || out[j] == '\n' || out[j] == '\t' || out[j] == '\r') {
+				j++
+			}
+			if j < len(out) && (out[j] == '}' || out[j] == ']') {
+				out[i] = ' '
+			}
+		}
+	}
+	return out, nil
+}
+func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		b, err = json.MarshalIndent(defaults, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		b = annotateDefaults(filepath.Base(path), b)
+		b = append(b, '\n')
+		if err = os.WriteFile(path, b, 0600); err != nil {
+			return nil, err
+		}
+	}
+	b = bytes.TrimPrefix(b, []byte{0xef, 0xbb, 0xbf})
+	normalized, err := NormalizeJSONC(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	var obj map[string]json.RawMessage
+	if err = json.Unmarshal(normalized, &obj); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", filepath.Base(path), err)
+	}
+	if obj == nil {
+		return nil, fmt.Errorf("%s must be a JSON object", filepath.Base(path))
+	}
+	return obj, nil
+}
+func preferred(dir, stem string) string {
+	p := filepath.Join(dir, stem+".jsonc")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	legacy := filepath.Join(dir, stem+".json")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return p
+}
+func DefaultDirectory() (string, error) {
+	if x := os.Getenv("LAZYBW_CONFIG_DIR"); x != "" {
+		return x, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "lazybw"), nil
+}
+
+// Load preserves existing files and merges defaults in memory. JSONC wins over JSON.
+func Load(dir string) (Config, error) {
+	if dir == "" {
+		var err error
+		dir, err = DefaultDirectory()
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return Config{}, err
+	}
+	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us"}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
+	if err != nil {
+		return Config{}, err
+	}
+	keys, err := readObject(preferred(dir, "keybinds"), DefaultKeybinds)
+	if err != nil {
+		return Config{}, err
+	}
+	c := Config{Directory: dir, Colors: map[string]string{}, Keybinds: map[string]map[string][]string{}}
+	c.Local.VaultEncryption = "aes-256-gcm"
+	c.Network.USPingURL = "https://api.bitwarden.com"
+	c.Network.EUPingURL = "https://api.bitwarden.eu"
+	for k, v := range DefaultColors {
+		c.Colors[k] = v
+	}
+	if raw := settings["authentication"]; len(raw) > 0 {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			_ = json.Unmarshal(fields["client_env_path"], &c.Authentication.ClientEnvPath)
+			_ = json.Unmarshal(fields["default_server"], &c.Authentication.DefaultServer)
+		}
+	}
+	if raw := settings["local_replication"]; len(raw) > 0 {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			_ = json.Unmarshal(fields["save_vault"], &c.Local.SaveVault)
+			_ = json.Unmarshal(fields["vault_path"], &c.Local.VaultPath)
+			_ = json.Unmarshal(fields["vault_encryption"], &c.Local.VaultEncryption)
+		}
+	}
+	if raw := settings["network"]; len(raw) > 0 {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			_ = json.Unmarshal(fields["us_ping_url"], &c.Network.USPingURL)
+			_ = json.Unmarshal(fields["eu_ping_url"], &c.Network.EUPingURL)
+		}
+	}
+	// Missing, null and unknown regions consistently fall back to the US.
+	c.Authentication.DefaultServer = NormalizeServer(c.Authentication.DefaultServer)
+	if raw := settings["colors"]; len(raw) > 0 {
+		var override map[string]string
+		if err = json.Unmarshal(raw, &override); err != nil {
+			return Config{}, err
+		}
+		for k, v := range override {
+			c.Colors[k] = v
+		}
+	}
+	for section, defaults := range DefaultKeybinds {
+		c.Keybinds[section] = make(map[string][]string)
+		for action, bindings := range defaults {
+			c.Keybinds[section][action] = append([]string(nil), bindings...)
+		}
+		raw := keys[section]
+		if section == "edits" && len(raw) == 0 {
+			raw = keys["changes"]
+		}
+		if len(raw) > 0 {
+			var overrides map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &overrides); err != nil {
+				return Config{}, err
+			}
+			for action, value := range overrides {
+				if section == "global" && action == "save_all" {
+					action = "push_all"
+				}
+				bindings, err := decodeBindings(value)
+				if err != nil {
+					return Config{}, fmt.Errorf("keybinds.%s.%s: %w", section, action, err)
+				}
+				c.Keybinds[section][action] = bindings
+			}
+		}
+	}
+	return c, nil
+}
+
+// Keys returns every configured binding for an action, in display order.
+func (c Config) Keys(section, action string) []string {
+	return append([]string(nil), c.Keybinds[section][action]...)
+}
+
+// Key returns the preferred binding displayed in the footer.
+func (c Config) Key(section, action string) string {
+	bindings := c.Keybinds[section][action]
+	if len(bindings) == 0 {
+		return ""
+	}
+	return bindings[0]
+}
+
+// decodeBindings accepts the legacy string form and ordered binding arrays.
+func decodeBindings(raw json.RawMessage) ([]string, error) {
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return []string{strings.ToLower(strings.TrimSpace(one))}, nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return nil, fmt.Errorf("expected a key or list of keys: %w", err)
+	}
+	for index, key := range many {
+		many[index] = strings.ToLower(strings.TrimSpace(key))
+		if many[index] == "" {
+			return nil, errors.New("empty key binding")
+		}
+	}
+	return many, nil
+}
+
+var defaultEnum = map[string]string{
+	"default_server":   "us, eu",
+	"vault_encryption": "aes-256-gcm, aes-256-gcm-siv, xchacha20-poly1305",
+}
+var defaultLine = regexp.MustCompile(`^(\s*)"([^"]+)":`)
+
+// annotateDefaults adds JSONC hints while keeping generated settings editable.
+func annotateDefaults(filename string, jsonData []byte) []byte {
+	var out strings.Builder
+	if filename == "keybinds.jsonc" {
+		out.WriteString("// Each action accepts a list of keys. The first is used in hints.\n")
+		out.WriteString("// Examples: [\"s\", \"enter\"], [\"ctrl+p\"]. Existing strings still work.\n")
+	} else if filename == "settings.jsonc" {
+		out.WriteString("// Colors: transparent, ansi_<color>, ansi_bright_<color>, ansi256:0..255, #RRGGBB.\n")
+		out.WriteString("// Available colors: black, red, green, yellow, blue, magenta, cyan, white.\n")
+	}
+	for _, line := range strings.Split(string(jsonData), "\n") {
+		if filename == "settings.jsonc" {
+			match := defaultLine.FindStringSubmatch(line)
+			if len(match) > 0 {
+				if choices, ok := defaultEnum[match[2]]; ok {
+					out.WriteString(match[1] + "// Allowed values: " + choices + "\n")
+				}
+			}
+		}
+		out.WriteString(line + "\n")
+	}
+	return []byte(strings.TrimSuffix(out.String(), "\n"))
+}
+
+// NormalizeServer accepts the supported Bitwarden cloud regions.
+func NormalizeServer(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "eu":
+		return "eu"
+	case "us":
+		return "us"
+	default:
+		return "us"
+	}
+}

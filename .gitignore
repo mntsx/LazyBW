@@ -1,0 +1,33 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.out
+*.test
+
+# Go local environment and cache
+/.go/
+/.go-env
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Test and profiling artifacts
+/coverage/
+*.prof
+*.pprof
+*.trace
+
+# IDEs and editors
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

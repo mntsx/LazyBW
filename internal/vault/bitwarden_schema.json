@@ -1,0 +1,363 @@
+{
+  "schema_version": 1,
+  "item_types": [
+    {
+      "id": 1,
+      "name": "Login",
+      "icon": "󰖟",
+      "fields": [
+        {
+          "name": "Username",
+          "path": [
+            "login",
+            "username"
+          ]
+        },
+        {
+          "name": "Password",
+          "path": [
+            "login",
+            "password"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "TOTP",
+          "path": [
+            "login",
+            "totp"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "Websites",
+          "path": [
+            "login",
+            "uris"
+          ],
+          "websites": true
+        },
+        {
+          "name": "Notes",
+          "path": [
+            "notes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Secure note",
+      "icon": "",
+      "fields": [
+        {
+          "name": "Notes",
+          "path": [
+            "notes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Card",
+      "icon": "",
+      "fields": [
+        {
+          "name": "Cardholder",
+          "path": [
+            "card",
+            "cardholderName"
+          ]
+        },
+        {
+          "name": "Brand",
+          "path": [
+            "card",
+            "brand"
+          ],
+          "options": [
+            "Visa",
+            "Mastercard",
+            "American Express",
+            "Discover",
+            "Diners Club",
+            "JCB",
+            "Maestro",
+            "UnionPay",
+            "RuPay",
+            "Other"
+          ]
+        },
+        {
+          "name": "Number",
+          "path": [
+            "card",
+            "number"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "Expiry month",
+          "path": [
+            "card",
+            "expMonth"
+          ]
+        },
+        {
+          "name": "Expiry year",
+          "path": [
+            "card",
+            "expYear"
+          ]
+        },
+        {
+          "name": "Security code",
+          "path": [
+            "card",
+            "code"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "Notes",
+          "path": [
+            "notes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Identity",
+      "icon": "",
+      "fields": [
+        {
+          "name": "Title",
+          "path": [
+            "identity",
+            "title"
+          ],
+          "options": [
+            "Mr",
+            "Mrs",
+            "Ms",
+            "Mx",
+            "Dr"
+          ]
+        },
+        {
+          "name": "First name",
+          "path": [
+            "identity",
+            "firstName"
+          ]
+        },
+        {
+          "name": "Middle name",
+          "path": [
+            "identity",
+            "middleName"
+          ]
+        },
+        {
+          "name": "Last name",
+          "path": [
+            "identity",
+            "lastName"
+          ]
+        },
+        {
+          "name": "Username",
+          "path": [
+            "identity",
+            "username"
+          ]
+        },
+        {
+          "name": "Company",
+          "path": [
+            "identity",
+            "company"
+          ]
+        },
+        {
+          "name": "National Insurance number",
+          "path": [
+            "identity",
+            "ssn"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "Passport number",
+          "path": [
+            "identity",
+            "passportNumber"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "License number",
+          "path": [
+            "identity",
+            "licenseNumber"
+          ]
+        },
+        {
+          "name": "Email",
+          "path": [
+            "identity",
+            "email"
+          ]
+        },
+        {
+          "name": "Phone",
+          "path": [
+            "identity",
+            "phone"
+          ]
+        },
+        {
+          "name": "Address 1",
+          "path": [
+            "identity",
+            "address1"
+          ]
+        },
+        {
+          "name": "Address 2",
+          "path": [
+            "identity",
+            "address2"
+          ]
+        },
+        {
+          "name": "Address 3",
+          "path": [
+            "identity",
+            "address3"
+          ]
+        },
+        {
+          "name": "City / town",
+          "path": [
+            "identity",
+            "city"
+          ]
+        },
+        {
+          "name": "County",
+          "path": [
+            "identity",
+            "state"
+          ]
+        },
+        {
+          "name": "Postal code",
+          "path": [
+            "identity",
+            "postalCode"
+          ]
+        },
+        {
+          "name": "Country",
+          "path": [
+            "identity",
+            "country"
+          ]
+        },
+        {
+          "name": "Notes",
+          "path": [
+            "notes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "SSH key",
+      "icon": "󰌆",
+      "fields": [
+        {
+          "name": "PrivateKey",
+          "path": [
+            "sshKey",
+            "privateKey"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "PublicKey",
+          "path": [
+            "sshKey",
+            "publicKey"
+          ]
+        },
+        {
+          "name": "Fingerprint",
+          "path": [
+            "sshKey",
+            "fingerprint"
+          ]
+        },
+        {
+          "name": "Notes",
+          "path": [
+            "notes"
+          ]
+        }
+      ]
+    }
+  ],
+  "creation_order": [
+    1,
+    3,
+    4,
+    2,
+    5
+  ],
+  "custom_field_types": [
+    {
+      "name": "Text",
+      "id": 0,
+      "icon": "󰊄",
+      "initial_value": ""
+    },
+    {
+      "name": "Hidden",
+      "id": 1,
+      "icon": "󰟵",
+      "initial_value": ""
+    },
+    {
+      "name": "Checkbox",
+      "id": 2,
+      "icon": "󰄵",
+      "initial_value": "false"
+    },
+    {
+      "name": "Linked",
+      "id": 3,
+      "icon": "󰌹",
+      "initial_value": ""
+    }
+  ],
+  "website_field": {
+    "name": "Website",
+    "id": -1,
+    "icon": "󰖟",
+    "initial_value": ""
+  },
+  "linked_targets": [
+    {
+      "name": "Username",
+      "id": 100
+    },
+    {
+      "name": "Password",
+      "id": 101
+    }
+  ]
+}
