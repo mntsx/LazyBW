@@ -5,11 +5,14 @@
 
 LazyBW is a terminal user interface (TUI) built on top of the official [Bitwarden CLI (`bw`)](https://bitwarden.com/help/cli/), providing a convenient, keyboard-driven way to browse, search, create, edit, and organize vault items without dealing directly with CLI commands. It also introduces a feature not supported by `bw`: **the ability to create encrypted, read-only local replicas of your personal vault**, allowing offline access to your stored information without connecting to Bitwarden's servers. All other functionality relies on the existing capabilities of the official CLI.
 
+
+<!--
 **Snap installation**:
 
 ```bash
 sudo snap install lazybw
 ```
+-->
 
 ## Dependencies
 
