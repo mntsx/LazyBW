@@ -31,3 +31,10 @@
 # OS files
 .DS_Store
 Thumbs.db
+
+# Snapcraft build artifacts
+/snap/payload/
+/parts/
+/prime/
+/stage/
+*.snap

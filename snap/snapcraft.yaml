@@ -1,0 +1,32 @@
+
+name: lazybw
+title: LazyBW
+version: '1.0.0'
+
+summary: Terminal-based Bitwarden vault manager
+description: |
+  LazyBW is a terminal user interface for managing Bitwarden
+  vaults, editing items and folders, synchronizing remote edits,
+  and accessing encrypted local vault replicas.
+
+  Requires the Bitwarden CLI (bw) installed on the host system.
+
+contact: https://github.com/mntsx/LazyBW/issues
+issues: https://github.com/mntsx/LazyBW/issues
+source-code: https://github.com/mntsx/LazyBW
+website: https://github.com/mntsx/LazyBW
+
+base: core24
+grade: stable
+confinement: classic
+
+apps:
+  lazybw:
+    command: bin/lazybw
+    environment:
+      PATH: /usr/local/bin:/usr/bin:/bin:/snap/bin
+
+parts:
+  lazybw:
+    plugin: dump
+    source: snap/payload
