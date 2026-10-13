@@ -911,7 +911,11 @@ func (a *App) createRender(c *Canvas) {
 		c.Fill(x, y, w, 12, ' ', CWhite, CDefault)
 		drawDialogBorder(c, x, y, w, 12)
 		c.Text(x+2, y+1, "Master password re-prompt", CBBlue, CDefault)
-		c.Text(x+3, y+3, "Verify the master password to open this item", CWhite, CDefault)
+		message := "Verify the master password to open this item"
+		if s.RepromptDeleteID != "" {
+			message = "Verify the master password to delete this item"
+		}
+		c.Text(x+3, y+3, message, CWhite, CDefault)
 		a.authField(c, x+4, y+5, w-8, "Master password", s.MasterText(), true, !s.AuthVisible)
 		if s.RepromptError != "" {
 			c.Text(x+4, y+8, s.RepromptError, CRed, CDefault)

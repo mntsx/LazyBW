@@ -418,9 +418,16 @@ func (a *App) char(r rune) error {
 			it := s.CurrentItem()
 			if it != nil && it.CanEdit() {
 				a.confirm("Delete item?", "Delete "+it.Name()+"?", nil, false, false, func(ok bool) {
-					if ok {
-						s.DeleteItem()
+					if !ok {
+						return
 					}
+					// Re-verify even if Content was previously unlocked.
+					if it.Raw["reprompt"] == 1 || it.Raw["reprompt"] == float64(1) {
+						a.startReprompt(it.ID())
+						s.RepromptDeleteID = it.ID()
+						return
+					}
+					s.DeleteItem()
 				})
 			}
 		case PaneChanges:
@@ -492,6 +499,7 @@ func (a *App) char(r rune) error {
 func (a *App) startReprompt(id string) {
 	s := a.S
 	s.RepromptTargetID = id
+	s.RepromptDeleteID = ""
 	s.Focus = PaneItems
 	s.RepromptApprovedID = ""
 	s.RepromptError = ""
@@ -889,6 +897,16 @@ func (a *App) enter() error {
 		s.RepromptError = ""
 		s.ClearMaster()
 		s.Mode = Browse
+		if deleteID := s.RepromptDeleteID; deleteID != "" {
+			s.RepromptDeleteID = ""
+			// Never delete a different item if the list changed while the
+			// password prompt was open.
+			if item := s.CurrentItem(); item != nil && item.ID() == deleteID {
+				s.DeleteItem()
+			}
+			s.RepromptApprovedID = ""
+			return nil
+		}
 		s.OpenItem()
 		return nil
 	}
@@ -1171,6 +1189,7 @@ func (a *App) escape() error {
 		DialogIdentityTitle, DialogReprompt, Edit:
 		if s.Mode == DialogReprompt {
 			s.RepromptTargetID = ""
+			s.RepromptDeleteID = ""
 			s.RepromptError = ""
 			s.ClearMaster()
 		}

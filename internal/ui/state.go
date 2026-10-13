@@ -122,6 +122,7 @@ type State struct {
 	ChoiceIndex                        int
 	FolderChoiceID                     string
 	RepromptTargetID                   string
+	RepromptDeleteID                   string
 	RepromptError                      string
 	RepromptApprovedID                 string
 	KeyFeedback, KeyFeedbackAction     string
@@ -643,6 +644,11 @@ func (s *State) CreateItem(typ int, name string) {
 		return
 	}
 	it := vault.NewItem(typ, name, vault.LocalID(), s.CLI.Cipher)
+	// Only the applied folder filter determines the new item's folder. The
+	// highlighted row can differ from the active folder filter.
+	if s.FilterFolder > 0 && s.FilterFolder <= len(s.Folders) {
+		it.Raw["folderId"] = s.Folders[s.FilterFolder-1]["id"]
+	}
 	s.Items = append(s.Items, it)
 	vault.SortedItems(s.Items)
 	s.Stage.Record("item", it.Raw, vault.TypeNames[typ], s.Originals)
@@ -666,6 +672,12 @@ func (s *State) DeleteItem() {
 	}
 	it := s.CurrentItem()
 	if it == nil || !it.CanEdit() {
+		return
+	}
+	// This is also enforced at the staging boundary: callers must not
+	// bypass the password check by deleting a protected item directly.
+	if (it.Raw["reprompt"] == 1 || it.Raw["reprompt"] == float64(1)) &&
+		s.RepromptApprovedID != it.ID() {
 		return
 	}
 	s.Stage.Delete("item", it.ID(), vault.TypeNames[it.Type()], s.Originals)
