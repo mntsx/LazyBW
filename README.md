@@ -19,7 +19,7 @@ Terminal dependencies:
 | --- | --- |
 | [`bw`](https://bitwarden.com/help/cli/) **(required)** | All Bitwarden authentication and remote vault operations; must be available on `PATH`. |
 | A UTF-8 terminal **(required)** | A terminal with true-color and mouse support is recommended. |
-| `wl-copy` (Wayland), `xclip` (X11), or `clip.exe` (WSL); Windows `clip` **(optional)** | Copying values to the system clipboard. |
+| `wl-copy` (Wayland), `xclip` (X11), or `clip.exe` (WSL) **(optional)** | Copying values to the system clipboard. |
 | `tput` **(optional)** | Improved Backspace / Ctrl+Backspace detection through terminfo. |
 | Go **(build only)** | Compiling from source; not needed for a Snap installation. |
 
