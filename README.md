@@ -1,17 +1,18 @@
 # LazyBW — A TUI to manage the Bitwarden CLI
 
-LazyBW is a terminal interface for the official [Bitwarden CLI (`bw`)](https://bitwarden.com/help/cli/). It makes everyday vault management easier without replacing Bitwarden or its CLI.
+> \[!NOTE] LazyBW project and its contributors are not affiliated with, endorsed by, or sponsored by Bitwarden, Inc.
 
-**Snap installation** (once the LazyBW package is published):
+LazyBW is a terminal user interface (TUI) built on top of the official [Bitwarden CLI (`bw`)](https://bitwarden.com/help/cli/), providing a convenient, keyboard-driven way to browse, search, create, edit, and organize vault items without dealing directly with CLI commands. It also introduces a feature not supported by `bw`: **the ability to create encrypted, read-only local replicas of your personal vault**, allowing offline access to your stored information without connecting to Bitwarden's servers. All other functionality relies on the existing capabilities of the official CLI.
+
+**Snap installation**:
 
 ```bash
 sudo snap install lazybw
-lazybw
 ```
 
-> **Independent project.** LazyBW and its contributors are not affiliated with, endorsed by, or sponsored by Bitwarden, Inc.
-
 ## Dependencies
+
+Terminal dependencies:
 
 | Requirement | Purpose |
 | --- | --- |
@@ -21,7 +22,14 @@ lazybw
 | `tput` **(optional)** | Improved Backspace / Ctrl+Backspace detection through terminfo. |
 | Go **(build only)** | Compiling from source; not needed for a Snap installation. |
 
-Go dependencies (fetched through Go modules): [`awesome-gocui/gocui`](https://github.com/awesome-gocui/gocui), [`gdamore/tcell/v2`](https://github.com/gdamore/tcell), [`ericlagergren/siv`](https://github.com/ericlagergren/siv), and [`golang.org/x/crypto`](https://pkg.go.dev/golang.org/x/crypto).
+Go dependencies (automatically fetched through Go modules):
+
+| Package                                                         | Purpose                                           |
+| --------------------------------------------------------------- | ------------------------------------------------- |
+| [`awesome-gocui/gocui`](https://github.com/awesome-gocui/gocui) | Terminal user interface framework                 |
+| [`gdamore/tcell/v2`](https://github.com/gdamore/tcell)          | Terminal input and event handling                 |
+| [`ericlagergren/siv`](https://github.com/ericlagergren/siv)     | AES-SIV authenticated encryption                  |
+| [`golang.org/x/crypto`](https://pkg.go.dev/golang.org/x/crypto) | Additional cryptographic algorithms and utilities |
 
 ## Sign in to Bitwarden
 
