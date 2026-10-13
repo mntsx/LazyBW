@@ -356,6 +356,7 @@ func drawMainBorders(c *Canvas, separators []int, sideRows []int, footerY int, s
 func (a *App) mainRender(c *Canvas) {
 	s := a.S
 	w, h := c.W, c.H
+	a.renderWidth, a.renderHeight = w, h
 	if w < 65 || h < 19 {
 		drawMainBorders(c, nil, nil, h-3)
 		c.Text(1, 1, "Resize terminal to at least 65 × 19", CYellow, CDefault)
@@ -1057,11 +1058,11 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 		pages := PaginateHints(a.hints(), limit)
 		page := pages[s.HintPage%len(pages)]
 		startX := x
-		if s.Popup != nil || s.Mode == DialogCreate || s.Mode == DialogFieldType ||
+		if s.Popup == nil && (s.Mode == DialogCreate || s.Mode == DialogFieldType ||
 			s.Mode == DialogWebsite || s.Mode == DialogLinkedChoice ||
 			s.Mode == DialogCardBrand || s.Mode == DialogIdentityTitle ||
 			s.Mode == DialogFoldersChoice || s.Mode == DialogName ||
-			s.Mode == DialogField || s.Mode == DialogFolder || s.Mode == DialogReprompt {
+			s.Mode == DialogField || s.Mode == DialogFolder || s.Mode == DialogReprompt) {
 			total := 0
 			for _, hint := range page {
 				total += utf8.RuneCountInString(hint) + 3
@@ -1241,6 +1242,9 @@ func (a *App) baseHints() []string {
 		h = append(h, "ENTER apply", "esc back")
 	case s.Mode == Edit:
 		h = append(h, "ENTER apply", "esc cancel", "ctrl+ENTER newline")
+		if s.InputSecret {
+			h = append(h, "ctrl+r reveal")
+		}
 	case s.Focus == PaneChanges:
 		h = append(h, "↑/↓ move")
 		if s.ServerConnected && !s.ImportedChangeAt(s.ChangeIndex) {

@@ -38,6 +38,7 @@ type App struct {
 	itemScroll, contentScroll                 int
 	sideScroll                                [4]int
 	itemX, itemW, contentX, contentW, detailX int
+	renderWidth, renderHeight                 int
 	detailY, detailH                          int
 	terminalBS                                byte
 	nativeWordKeys                            []terminalkeys.Binding

@@ -55,10 +55,10 @@ func TestActivePanelNumbersBlinkYellow(t *testing.T) {
 	}
 }
 
-func TestFolderStartsUnselected(t *testing.T) {
+func TestFolderStartsUnappliedButNoFolderHighlighted(t *testing.T) {
 	s := setup(t)
-	if s.FilterFolder != -1 || s.Filters[2] != -1 {
-		t.Fatalf("folder filter should start unset: filter=%d cursor=%d", s.FilterFolder, s.Filters[2])
+	if s.FilterFolder != -1 || s.Filters[2] != 0 {
+		t.Fatalf("folder filter should start unapplied with No Folder highlighted: filter=%d cursor=%d", s.FilterFolder, s.Filters[2])
 	}
 	folderItem := vault.NewItem(vault.Login, "In a folder", "folder-item", s.CLI.Cipher)
 	folderItem.Raw["folderId"] = "folder-1"

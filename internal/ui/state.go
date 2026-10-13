@@ -158,7 +158,7 @@ func (s *State) ClearWorkspaceNotice() {
 }
 
 func NewState(cfg config.Config, cli *bitwarden.Client) *State {
-	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, -1, 0}}
+	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, 0, 0}}
 }
 
 // ProtectMaster encrypts the editing buffer between keystrokes in the live UI.
@@ -499,6 +499,8 @@ func (s *State) BeginTextEdit() error {
 	s.Mode = Edit
 	s.Focus = PaneDetail
 	s.InputSecret = f.Hidden
+	// Content and Details share the visibility of this specific hidden field.
+	s.AuthVisible = f.Hidden && s.Revealed[s.RevealKey()]
 	return nil
 }
 
@@ -635,6 +637,7 @@ func (s *State) ExitEdit() {
 	s.Input = ""
 	s.EditorOriginal = ""
 	s.InputSecret = false
+	s.AuthVisible = false // Never carry editor visibility into authentication.
 	s.EditPath = nil
 	s.EditNewWebsite = false
 	s.loadFields()
@@ -705,7 +708,7 @@ func (s *State) DeleteFolder() {
 	}
 	s.Stage.Delete("folder", id, "Folder", s.FolderOriginals)
 	s.Folders = append(s.Folders[:s.Filters[2]-1], s.Folders[s.Filters[2]:]...)
-	s.Filters[2] = -1
+	s.Filters[2] = 0 // Keep No Folder highlighted, without applying its filter.
 	s.FilterFolder = -1
 	s.recompute()
 	s.loadFields()

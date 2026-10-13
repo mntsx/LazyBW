@@ -297,8 +297,11 @@ func (s *State) ApplyRemoteReview(review *bitwarden.RemoteReview, track bool) {
 		s.Filters[2] = s.FilterFolder
 	} else if s.FilterFolder > len(s.Folders) {
 		s.FilterFolder = -1
-		s.Filters[2] = -1
+		s.Filters[2] = 0 // No Folder is highlighted even with no applied filter.
 	}
+	// The highlighted folder may also have been removed while no folder
+	// filter was applied. Keep the cursor on a visible row in either case.
+	s.Filters[2] = max(0, min(len(s.Folders), s.Filters[2]))
 	if s.SelectedID != "" && s.SelectedItem() == nil {
 		s.CloseItem()
 	}

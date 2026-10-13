@@ -70,8 +70,8 @@ func TestSecureNoteNeverPreviewsNotes(t *testing.T) {
 	}
 }
 
-// TestPopupFooterCentersBothKeyAndAction guards aligned hint pairs.
-func TestPopupFooterCentersBothKeyAndAction(t *testing.T) {
+// TestPopupFooterKeepsBothKeyAndActionLeftAligned checks workspace footer hints.
+func TestPopupFooterKeepsBothKeyAndActionLeftAligned(t *testing.T) {
 	s := setup(t)
 	defer s.CLI.Cipher.Close()
 	s.Popup = &Popup{Title: "Message", Acknowledge: true}
@@ -80,14 +80,37 @@ func TestPopupFooterCentersBothKeyAndAction(t *testing.T) {
 	const x, y, w = 1, 42, 118
 	a.footer(c, x, y, w)
 
-	hints := a.hints()
-	limit := max(18, 3*w/4)
+	assertFooterHintPairs(t, c, a.hints(), x, y)
+}
+
+// TestDialogFooterCentersBothKeyAndAction checks the dialog footer layout.
+func TestDialogFooterCentersBothKeyAndAction(t *testing.T) {
+	s := setup(t)
+	defer s.CLI.Cipher.Close()
+	s.Mode = DialogCreate
+	a := New(s)
+	c := NewCanvas(120, 44)
+	const x, y, w = 1, 42, 118
+	a.footer(c, x, y, w)
+
+	hints := PaginateHints(a.hints(), max(18, 3*w/4))[0]
 	total := 0
 	for _, hint := range hints {
 		total += utf8.RuneCountInString(hint) + 3
 	}
-	total -= 3
-	start := x + max(0, (limit-total)/2)
+	if total > 0 {
+		total -= 3
+	}
+	start := x + max(0, (max(18, 3*w/4)-total)/2)
+	assertFooterHintPairs(t, c, hints, start, y)
+	if cell := canvasAt(c, x, y); cell.R != ' ' {
+		t.Fatalf("dialog footer is not centered: %#v", cell)
+	}
+}
+
+// assertFooterHintPairs checks that each action follows its key without overlap.
+func assertFooterHintPairs(t *testing.T, c *Canvas, hints []string, start, y int) {
+	t.Helper()
 	offset := 0
 	for _, hint := range hints {
 		parts := strings.SplitN(hint, " ", 2)
@@ -108,8 +131,5 @@ func TestPopupFooterCentersBothKeyAndAction(t *testing.T) {
 			}
 		}
 		offset += utf8.RuneCountInString(hint) + 3
-	}
-	if cell := canvasAt(c, x, y); cell.R != ' ' {
-		t.Fatalf("action text incorrectly drawn at footer margin: %#v", cell)
 	}
 }

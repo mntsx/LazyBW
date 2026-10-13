@@ -504,6 +504,7 @@ func (a *App) startReprompt(id string) {
 	s.RepromptApprovedID = ""
 	s.RepromptError = ""
 	s.ClearMaster()
+	s.AuthVisible = false // A new master-password prompt always starts masked.
 	s.Caret = 0
 	s.Mode = DialogReprompt
 }
@@ -1500,18 +1501,33 @@ func (a *App) clickAt(x, y int) error {
 				s.RepromptApprovedID = ""
 				s.Focus = Pane(j + 1)
 				index := y - start - 2 + a.sideScroll[j]
-				if y-start-2 < 0 {
+				// Blank rows focus the pane and highlight its applied filter
+				// (or the first option), but never activate a filter.
+				count := 0
+				switch s.Focus {
+				case PaneVault:
+					count = 2
+				case PaneTypes:
+					count = 7
+				case PaneFolders:
+					count = 1 + len(s.Folders)
+				case PaneChanges:
+					count = len(s.ChangesList())
+				}
+				if y < start+2 || y >= start+a.sideH[j]-1 ||
+					index < 0 || index >= count {
+					a.selectAppliedSidebarRow()
 					return nil
 				}
 				switch s.Focus {
 				case PaneVault:
-					s.Filters[0] = 1 - max(0, min(1, index))
+					s.Filters[0] = 1 - index
 				case PaneTypes:
-					s.Filters[1] = max(0, min(6, index))
+					s.Filters[1] = index
 				case PaneFolders:
-					s.Filters[2] = max(0, min(len(s.Folders), index))
+					s.Filters[2] = index
 				case PaneChanges:
-					s.ChangeIndex = max(0, min(len(s.ChangesList())-1, index))
+					s.ChangeIndex = index
 				}
 				return a.enter()
 			}
@@ -1539,6 +1555,12 @@ func (a *App) clickAt(x, y int) error {
 		}
 		return nil
 	}
+	if s.SelectedID != "" && a.contentX > 0 &&
+		x >= a.contentX && x < a.contentX+a.contentW &&
+		y >= 0 && y < a.height()-3 {
+		s.Focus = PaneContent
+		return nil
+	}
 	if x >= a.itemX && x < a.itemX+a.itemW {
 		// Clicking the Name / Owner / State title bar focuses Items without
 		// opening an entry or changing the selected item.
@@ -1546,8 +1568,8 @@ func (a *App) clickAt(x, y int) error {
 			s.Focus = PaneItems
 			return nil
 		}
-		if y < 3 {
-			return nil // the top border and blue separator are not interactive
+		if y == 2 {
+			return nil // Header separator is not a focusable panel area.
 		}
 		// Find occupies the bottom row of Items; clicking it toggles focus.
 		if y == a.height()-4 {
@@ -1570,8 +1592,26 @@ func (a *App) clickAt(x, y int) error {
 			s.ItemIndex = index
 			return a.enter()
 		}
+		// Empty space inside the Items panel still transfers keyboard focus.
+		s.Focus = PaneItems
 	}
 	return nil
+}
+
+// selectAppliedSidebarRow highlights the active filter after a blank-area click.
+// This changes only the keyboard selection; it does not apply another filter.
+func (a *App) selectAppliedSidebarRow() {
+	s := a.S
+	switch s.Focus {
+	case PaneVault:
+		s.Filters[0] = s.FilterVault
+	case PaneTypes:
+		s.Filters[1] = s.FilterType
+	case PaneFolders:
+		s.Filters[2] = max(0, min(len(s.Folders), s.FilterFolder))
+	case PaneChanges:
+		s.ChangeIndex = max(0, min(len(s.ChangesList())-1, s.ChangeIndex))
+	}
 }
 
 // authClickAt uses the shared form geometry without requiring a GUI in tests.
@@ -1612,8 +1652,21 @@ func (a *App) authClickAt(x, y, width, height int) error {
 	return nil
 }
 
-func (a *App) width() int  { w, _ := a.gui.Size(); return w }
-func (a *App) height() int { _, h := a.gui.Size(); return h }
+func (a *App) width() int {
+	if a.gui == nil {
+		return a.renderWidth
+	}
+	w, _ := a.gui.Size()
+	return w
+}
+
+func (a *App) height() int {
+	if a.gui == nil {
+		return a.renderHeight
+	}
+	_, h := a.gui.Size()
+	return h
+}
 
 // itemHitIndex accepts only cells within a rendered item rectangle, not
 // the header, search box, separators, footer or empty scroll padding.
@@ -1632,7 +1685,12 @@ func itemHitIndex(x, y, panelX, panelW, height, scroll, count int) (int, bool) {
 
 // toggleAuthVisibility reveals or masks authentication input without altering it.
 func (a *App) toggleAuthVisibility() error {
-	if a.S.Mode == DialogReprompt ||
+	if a.S.Screen == Workspace && a.S.Mode == Edit &&
+		a.S.Focus == PaneDetail && a.S.InputSecret {
+		// Toggle the same field-specific state used by Content.
+		a.S.Reveal()
+		a.S.AuthVisible = a.S.Revealed[a.S.RevealKey()]
+	} else if a.S.Mode == DialogReprompt ||
 		((a.S.Screen == AuthClient || a.S.Screen == AuthMaster) &&
 			!a.modalOpen()) {
 		a.S.AuthVisible = !a.S.AuthVisible
