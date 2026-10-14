@@ -1,7 +1,7 @@
 
 name: lazybw
 title: LazyBW
-version: '1.0.0'
+version: '1.0.1'
 
 summary: Terminal-based Bitwarden vault manager
 description: |
