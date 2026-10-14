@@ -1,0 +1,20 @@
+Source: lazybw
+Section: utils
+Priority: optional
+Maintainer: Miguel Montes Lorenzo <miguelmonteslorenzo@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ golang-1.26-go (>= 1.26.0)
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/mntsx/LazyBW
+
+Package: lazybw
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Terminal-based Bitwarden vault manager
+ LazyBW provides a terminal interface for managing Bitwarden
+ vaults, editing items and folders, synchronizing remote changes,
+ and accessing encrypted local vault replicas.
+ .
+ Requires the Bitwarden CLI (bw) for remote vault operations.

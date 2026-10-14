@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+export PATH := /usr/lib/go-1.26/bin:$(PATH)
+export GOPROXY := off
+export GOSUMDB := off
+export GOTOOLCHAIN := local
+export GOFLAGS := -mod=vendor
+export GOCACHE := $(CURDIR)/.gocache
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p build
+	mkdir -p "$(GOCACHE)"
+	go build -trimpath -o build/lazybw ./cmd/lazybw
+
+override_dh_auto_install:
+	install -Dm755 build/lazybw debian/lazybw/usr/bin/lazybw
+
+override_dh_dwz:
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
