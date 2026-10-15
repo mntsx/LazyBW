@@ -13,6 +13,14 @@ sudo snap install lazybw
 ```
 -->
 
+**APT installation**:
+
+```bash
+sudo add-apt-repository ppa:mntsx/lazybw
+sudo apt update
+sudo apt install lazybw
+```
+
 ## Dependencies
 
 Terminal dependencies:
