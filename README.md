@@ -13,12 +13,23 @@ sudo snap install lazybw
 ```
 -->
 
-**APT installation**:
+<!--
+**APT installation (Ubuntu 24.04, x86-64)**:
 
 ```bash
 sudo add-apt-repository ppa:mntsx/lazybw
 sudo apt update
 sudo apt install lazybw
+```
+-->
+
+**Installation**:
+
+```bash
+git clone git@github.com:mntsx/LazyBW.git
+cd LazyBW
+go build -o lazybw ./cmd/lazybw
+sudo install -m 755 lazybw /usr/local/bin/lazybw
 ```
 
 ## Dependencies
