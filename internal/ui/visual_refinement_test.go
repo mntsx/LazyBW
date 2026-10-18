@@ -207,7 +207,11 @@ func TestCreatePopupDoesNotAdvertiseGlobalShortcuts(t *testing.T) {
 		if strings.Contains(hints, "ctrl+q") || strings.Contains(hints, "ctrl+s") {
 			t.Fatalf("create dialog %v shows global hints: %q", mode, hints)
 		}
-		if !strings.Contains(hints, "ENTER") || !strings.Contains(hints, "esc") {
+		selectionKey := "ENTER"
+		if mode == DialogCreate || mode == DialogFieldType {
+			selectionKey = "→"
+		}
+		if !strings.Contains(hints, selectionKey) || !strings.Contains(hints, "esc") {
 			t.Fatalf("create dialog %v lacks its navigation hints: %q", mode, hints)
 		}
 	}

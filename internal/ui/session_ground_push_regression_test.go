@@ -41,11 +41,11 @@ func TestFolderHintsAdvertiseUnselect(t *testing.T) {
 	s.Filters[2] = 0
 	s.FilterFolder = 0
 	a := New(s)
-	if !strings.Contains(strings.Join(a.hints(), " "), "← unselect") {
-		t.Fatal("active folder must advertise left-arrow unselect")
+	if !strings.Contains(strings.Join(a.hints(), " "), "→ unselect") {
+		t.Fatal("active folder must advertise right-arrow unselect")
 	}
 	s.FilterFolder = -1
-	if !strings.Contains(strings.Join(a.hints(), " "), "← select") {
-		t.Fatal("inactive folder must advertise left-arrow select")
+	if !strings.Contains(strings.Join(a.hints(), " "), "→ select") {
+		t.Fatal("inactive folder must advertise right-arrow select")
 	}
 }

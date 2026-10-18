@@ -90,14 +90,14 @@ var DefaultKeybinds = map[string]map[string][]string{
 	},
 	"server_picker": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"filters": {
 		"next": {"down"}, "previous": {"up"},
-		"select": {"left", "enter"}, "return_to_items": {"escape"},
+		"select": {"right", "enter"}, "return_to_items": {"escape"},
 	},
 	"folders": {
-		"next": {"down"}, "previous": {"up"}, "select": {"left", "enter"},
+		"next": {"down"}, "previous": {"up"}, "select": {"right", "enter"},
 		"new": {"n"}, "delete": {"d"}, "return_to_items": {"escape"},
 	},
 	"items": {
@@ -142,42 +142,38 @@ var DefaultKeybinds = map[string]map[string][]string{
 	},
 	"create_item_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"create_field_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"linked_field_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"folder_selector_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"switch": {"s"}, "confirm": {"enter"}, "cancel": {"escape"},
+		"switch": {"right", "s"}, "confirm": {"enter"}, "cancel": {"escape"},
 	},
 	"card_brand_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"identity_title_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"website_popup": {
 		"next": {"down"}, "previous": {"up"},
-		"confirm": {"enter"}, "cancel": {"escape"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"reprompt_popup": {"confirm": {"enter"}, "cancel": {"escape"},
 		"reveal_password": {"ctrl+r"}},
 	"name_popup": {
-		"next": {"down"}, "previous": {"up"},
-		"button_left": {"left"}, "button_right": {"right"},
 		"confirm": {"enter"}, "cancel": {"escape"},
 	},
 	"folder_popup": {
-		"next": {"down"}, "previous": {"up"},
-		"button_left": {"left"}, "button_right": {"right"},
 		"confirm": {"enter"}, "cancel": {"escape"},
 	},
 }

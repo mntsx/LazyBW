@@ -88,7 +88,7 @@ func TestBusyHintsUseConfiguredGlobalKeys(t *testing.T) {
 	}
 }
 
-func TestFilterSelectionPrefersLeftAndKeepsEnter(t *testing.T) {
+func TestFilterSelectionPrefersRightAndKeepsEnter(t *testing.T) {
 	s := setup(t)
 	s.Screen = Workspace
 	s.Busy = false
@@ -96,14 +96,14 @@ func TestFilterSelectionPrefersLeftAndKeepsEnter(t *testing.T) {
 	s.Filters[1] = 2
 	a := New(s)
 
-	if handled, err := a.dispatchConfiguredKey("left"); err != nil || !handled {
-		t.Fatalf("left filter binding: handled=%t err=%v", handled, err)
+	if handled, err := a.dispatchConfiguredKey("right"); err != nil || !handled {
+		t.Fatalf("right filter binding: handled=%t err=%v", handled, err)
 	}
 	if s.FilterType != 2 {
-		t.Fatal("left did not activate the selected filter")
+		t.Fatal("right did not activate the selected filter")
 	}
 	if s.KeyFeedbackAction != "select" {
-		t.Fatalf("left filter feedback = %q; want select", s.KeyFeedbackAction)
+		t.Fatalf("right filter feedback = %q; want select", s.KeyFeedbackAction)
 	}
 	s.Filters[1] = 3
 	if handled, err := a.dispatchConfiguredKey("enter"); err != nil || !handled {
@@ -114,6 +114,27 @@ func TestFilterSelectionPrefersLeftAndKeepsEnter(t *testing.T) {
 	}
 	if s.KeyFeedbackAction != "select" {
 		t.Fatalf("enter filter feedback = %q; want select", s.KeyFeedbackAction)
+	}
+}
+
+func TestOptionPopupPrefersRightAndKeepsEnter(t *testing.T) {
+	for _, key := range []string{"right", "enter"} {
+		s := setup(t)
+		s.Mode = DialogCreate
+		s.NewType = 0
+		a := New(s)
+		hints := strings.Join(a.hints(), " ")
+		if !strings.Contains(hints, "→ select") || strings.Contains(hints, "ENTER select") {
+			t.Fatalf("option popup hint does not prefer right: %q", hints)
+		}
+		handled, err := a.dispatchConfiguredKey(key)
+		if err != nil || !handled {
+			t.Fatalf("%s popup binding: handled=%t err=%v", key, handled, err)
+		}
+		if s.Mode != DialogName {
+			t.Fatalf("%s did not select the item type: mode=%v", key, s.Mode)
+		}
+		s.CLI.Cipher.Close()
 	}
 }
 

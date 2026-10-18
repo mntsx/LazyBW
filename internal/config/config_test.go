@@ -56,8 +56,28 @@ func TestKeybindOverridesReplaceDefaults(t *testing.T) {
 	if got := cfg.Keys("global", "sync"); len(got) != 0 {
 		t.Fatalf("empty binding did not disable sync: %v", got)
 	}
-	if got := cfg.Keys("filters", "select"); len(got) != 2 || got[0] != "left" || got[1] != "enter" {
+	if got := cfg.Keys("filters", "select"); len(got) != 2 || got[0] != "right" || got[1] != "enter" {
 		t.Fatalf("unexpected filter selection defaults: %v", got)
+	}
+}
+
+func TestOptionPopupDefaultsPreferRightAndKeepAlternatives(t *testing.T) {
+	for _, testCase := range []struct {
+		section, action, alternative string
+	}{
+		{"server_picker", "confirm", "enter"},
+		{"create_item_popup", "confirm", "enter"},
+		{"create_field_popup", "confirm", "enter"},
+		{"linked_field_popup", "confirm", "enter"},
+		{"card_brand_popup", "confirm", "enter"},
+		{"identity_title_popup", "confirm", "enter"},
+		{"website_popup", "confirm", "enter"},
+		{"folder_selector_popup", "switch", "s"},
+	} {
+		bindings := DefaultKeybinds[testCase.section][testCase.action]
+		if len(bindings) != 2 || bindings[0] != "right" || bindings[1] != testCase.alternative {
+			t.Errorf("%s.%s = %v", testCase.section, testCase.action, bindings)
+		}
 	}
 }
 
