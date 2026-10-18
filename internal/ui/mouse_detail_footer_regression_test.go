@@ -72,3 +72,25 @@ func TestEmptyItemsAreaReceivesMouseFocus(t *testing.T) {
 		t.Fatal("clicking unused items-panel space must focus Items")
 	}
 }
+
+func TestEmptyItemsAreaLeavesFindMode(t *testing.T) {
+	s := setup(t)
+	defer s.CLI.Cipher.Close()
+	a := New(s)
+	s.Screen = Workspace
+	s.Focus = PaneItems
+	s.Mode = Find
+	s.Search = "query"
+	s.Input = s.Search
+	a.mainRender(NewCanvas(120, 44))
+
+	if err := a.clickAt(a.itemX+4, 30); err != nil {
+		t.Fatal(err)
+	}
+	if s.Mode != Browse || s.Focus != PaneItems {
+		t.Fatalf("empty-area click left mode=%v focus=%v; want Browse/Items", s.Mode, s.Focus)
+	}
+	if s.Search != "query" {
+		t.Fatal("leaving Find by mouse must preserve the active query")
+	}
+}

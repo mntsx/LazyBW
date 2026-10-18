@@ -16,43 +16,38 @@ import (
 
 func (a *App) bind(g *gocui.Gui) error {
 	a.terminalBS = terminalBackspaceCode()
-	bindings := []struct {
-		key    interface{}
-		action func() error
-	}{
-		{gocui.KeyArrowUp, func() error { return a.arrow(-1, 0) }},
-		{gocui.KeyArrowDown, func() error { return a.arrow(1, 0) }},
-		{gocui.KeyArrowLeft, func() error { return a.arrow(0, -1) }},
-		{gocui.KeyArrowRight, func() error { return a.arrow(0, 1) }},
-		// tcell decodes modified CSI keys without terminal-side remapping.
-		{gocui.KeyCtrlW, func() error { return a.wordEdit(-1, true) }},
-		{gocui.KeyEnter, a.keyboardEnter}, {gocui.KeyCtrlJ, func() error {
-			if a.modalOpen() {
-				return nil
-			}
-			if a.S.Mode == Edit {
-				f := a.S.CurrentField()
-				if f != nil && (f.Name == "Notes" || (f.Custom && f.FieldType == 0)) {
-					a.S.Insert('\n')
-				}
+	textOnly := func(action func() error) func() error {
+		return func() error {
+			if a.textEntryActive() {
+				return action()
 			}
 			return nil
-		}}, {gocui.KeyEsc, a.escape},
-		{gocui.KeyBackspace2, func() error {
-			return a.terminalBackspace(gocui.KeyBackspace2)
-		}},
-		{gocui.KeyBackspace, func() error {
-			return a.terminalBackspace(gocui.KeyBackspace)
-		}},
-		{gocui.KeyTab, func() error { return nil }},
-		{gocui.KeyDelete, a.deleteForward},
-		{gocui.KeyHome, func() error {
+		}
+	}
+	bindings := []struct {
+		key      interface{}
+		name     string
+		fallback func() error
+	}{
+		{gocui.KeyArrowUp, "up", textOnly(func() error { return a.arrow(-1, 0) })},
+		{gocui.KeyArrowDown, "down", textOnly(func() error { return a.arrow(1, 0) })},
+		{gocui.KeyArrowLeft, "left", textOnly(func() error { return a.arrow(0, -1) })},
+		{gocui.KeyArrowRight, "right", textOnly(func() error { return a.arrow(0, 1) })},
+		{gocui.KeyCtrlW, "ctrl+w", func() error { return a.wordEdit(-1, true) }},
+		{gocui.KeyEnter, "enter", nil},
+		{gocui.KeyCtrlJ, "ctrl+enter", nil},
+		{gocui.KeyEsc, "escape", nil},
+		{gocui.KeyBackspace2, "backspace", func() error { return a.terminalBackspace(gocui.KeyBackspace2) }},
+		{gocui.KeyBackspace, "backspace", func() error { return a.terminalBackspace(gocui.KeyBackspace) }},
+		{gocui.KeyTab, "tab", func() error { return nil }},
+		{gocui.KeyDelete, "delete", a.deleteForward},
+		{gocui.KeyHome, "home", func() error {
 			if !a.modalOpen() {
 				a.S.Caret = 0
 			}
 			return nil
 		}},
-		{gocui.KeyEnd, func() error {
+		{gocui.KeyEnd, "end", func() error {
 			if !a.modalOpen() {
 				if a.S.Screen != Workspace && a.S.AuthFocus < 2 {
 					a.S.Caret = utf8.RuneCountInString(a.authValue())
@@ -62,45 +57,40 @@ func (a *App) bind(g *gocui.Gui) error {
 			}
 			return nil
 		}},
-		{gocui.KeyCtrlQ, func() error { a.requestQuit(); return nil }},
-		{gocui.KeyCtrlS, func() error {
-			if a.S.Screen == AuthClient || a.S.Screen == AuthMaster || a.S.Screen == AuthOffline {
-				if a.S.Mode == DialogServer || a.S.Busy {
-					return nil
-				}
-				a.openServerPicker()
-				return nil
-			}
-			a.checkRemote()
-			return nil
-		}},
-		{gocui.KeyCtrlP, func() error { a.confirmStage(true, true); return nil }},
-		{gocui.KeyCtrlD, func() error { a.confirmStage(false, true); return nil }},
-		{gocui.KeyCtrlR, a.toggleAuthVisibility},
-		{gocui.MouseLeft, func() error { return a.click() }},
-		{gocui.MouseWheelUp, func() error { return a.arrow(-1, 0) }},
-		{gocui.MouseWheelDown, func() error { return a.arrow(1, 0) }},
+		{gocui.KeyCtrlQ, "ctrl+q", nil},
+		{gocui.KeyCtrlS, "ctrl+s", nil},
+		{gocui.KeyCtrlP, "ctrl+p", nil},
+		{gocui.KeyCtrlD, "ctrl+d", nil},
+		{gocui.KeyCtrlR, "ctrl+r", nil},
 	}
 	for _, entry := range bindings {
-		fn := entry.action
-		key := keyLabel(entry.key)
-		mouse := entry.key == gocui.MouseLeft ||
-			entry.key == gocui.MouseWheelUp || entry.key == gocui.MouseWheelDown
-		if err := g.SetKeybinding("", entry.key, gocui.ModNone,
+		spec := entry
+		if err := g.SetKeybinding("", spec.key, gocui.ModNone,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				if mouse {
-					return a.quitResult(fn())
+				handled, err := a.dispatchConfiguredKey(spec.name)
+				if handled {
+					return err
 				}
-				return a.handleKey(key, fn)
+				if spec.fallback != nil {
+					return a.handleKey(keyLabel(spec.key), spec.fallback)
+				}
+				if !a.textEntryActive() {
+					a.reportKey(hintLabel(spec.name), "unbound")
+				}
+				return nil
 			}); err != nil {
 			return err
 		}
 	}
-	for _, r := range "1234567fndrcesh?" {
-		char := r
-		if err := g.SetKeybinding("", r, gocui.ModNone, func(_ *gocui.Gui, _ *gocui.View) error {
-			return a.handleKey(string(char), func() error { return a.char(char) })
-		}); err != nil {
+	for _, entry := range []struct {
+		key    interface{}
+		action func() error
+	}{{gocui.MouseLeft, a.click},
+		{gocui.MouseWheelUp, func() error { return a.arrow(-1, 0) }},
+		{gocui.MouseWheelDown, func() error { return a.arrow(1, 0) }}} {
+		spec := entry
+		if err := g.SetKeybinding("", spec.key, gocui.ModNone,
+			func(_ *gocui.Gui, _ *gocui.View) error { return a.quitResult(spec.action()) }); err != nil {
 			return err
 		}
 	}
@@ -220,9 +210,22 @@ func (a *App) wordEdit(direction int, remove bool) error {
 
 func (a *App) editEvent(_ *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) {
 	if ch != 0 && mod == gocui.ModNone {
-		_ = a.handleKey(string(ch), func() error { return a.char(ch) })
+		name := string(ch)
+		if handled, _ := a.dispatchConfiguredKey(name); handled {
+			return
+		}
+		if a.textEntryActive() {
+			_ = a.handleKey(name, func() error { return a.char(ch) })
+		} else {
+			a.reportKey(name, "unbound")
+		}
 	} else if key == gocui.KeySpace {
-		_ = a.handleKey("space", func() error { return a.char(' ') })
+		if handled, _ := a.dispatchConfiguredKey("space"); handled {
+			return
+		}
+		if a.textEntryActive() {
+			_ = a.handleKey("space", func() error { return a.char(' ') })
+		}
 	} else if !a.textEntryActive() {
 		a.reportKey(keyLabel(key), "unbound")
 	}
@@ -1592,7 +1595,8 @@ func (a *App) clickAt(x, y int) error {
 			s.ItemIndex = index
 			return a.enter()
 		}
-		// Empty space inside the Items panel still transfers keyboard focus.
+		// Empty space inside Items leaves Find and transfers keyboard focus.
+		s.Mode = Browse
 		s.Focus = PaneItems
 	}
 	return nil
