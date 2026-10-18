@@ -116,7 +116,7 @@ You can update the replica without opening the TUI:
 lazybw replicate
 ```
 
-This uses `vault_path`, `client_env_path`, `default_server`, and `vault_encryption` from `settings.jsonc`. The command performs a fresh Bitwarden sync and overwrites the replica atomically. It runs even when `save_vault` is `false`, because invoking the command explicitly requests one replication. Optional overrides are available:
+This uses `vault_path`, `client_env_path`, `default_server`, and `vault_encryption` from `settings.jsonc`. The command reports each authentication, synchronization, and encryption step, performs a fresh Bitwarden sync, and overwrites the replica atomically. It runs even when `save_vault` is `false`, because invoking the command explicitly requests one replication. Optional overrides are available:
 
 ```bash
 lazybw replicate --path "$HOME/.local/share/lazybw/bw-vault" \

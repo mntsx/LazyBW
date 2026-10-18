@@ -53,6 +53,9 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+	options.Progress = func(message string) {
+		_, _ = fmt.Fprintln(stdout, message)
+	}
 	cli, err := bitwarden.NewClient(nil)
 	if err != nil {
 		return errors.New("unable to initialize encrypted vault session")
