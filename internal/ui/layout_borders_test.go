@@ -135,7 +135,7 @@ func TestAuthButtonSymmetrySpinnerPositionAndHintColors(t *testing.T) {
 			for _, buttonX := range []int{g.enterX, g.quitX} {
 				for xx := buttonX; xx < buttonX+g.buttonWidth; xx++ {
 					if c.Cells[g.buttonY*c.W+xx].BG == CDefault ||
-						(c.Cells[(g.buttonY+1)*c.W+xx].R != '▃') {
+						(c.Cells[(g.buttonY+1)*c.W+xx].R != buttonAccentGlyph) {
 						t.Fatalf("%v/%d: button cell missing at %d", screen, width, xx)
 					}
 				}

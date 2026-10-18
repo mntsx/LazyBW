@@ -130,6 +130,7 @@ type State struct {
 	EditorOriginal                     string
 	EditPath                           []any
 	FormFocus                          int
+	FormError                          string
 	NewFieldName                       string
 	Popup                              *Popup
 	Busy                               bool

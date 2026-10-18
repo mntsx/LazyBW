@@ -69,10 +69,10 @@ func TestButtonStatesSolidAndUnderline(t *testing.T) {
 		text, bg   int
 		lower      rune
 	}{
-		{false, false, CGreen, CBlack, '▁'},
-		{true, false, CBlack, CGreen, '▁'},
-		{false, true, CWhite, CDefault, '▁'},
-		{true, true, CWhite, CDefault, '▁'},
+		{false, false, CGreen, CBlack, buttonAccentGlyph},
+		{true, false, CBlack, CGreen, buttonAccentGlyph},
+		{false, true, CWhite, CDefault, buttonAccentGlyph},
+		{true, true, CWhite, CDefault, buttonAccentGlyph},
 	} {
 		c := NewCanvas(40, 10)
 		a.button(c, 3, 3, 12, "YES", CGreen, tc.sel, tc.hover)

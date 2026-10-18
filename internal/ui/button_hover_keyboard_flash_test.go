@@ -13,7 +13,7 @@ func TestAllButtonsHoverUsesWhite(t *testing.T) {
 				body := canvasAt(canvas, x, 4)
 				accent := canvasAt(canvas, x, 5)
 				if body.FG != CWhite || body.BG != CDefault ||
-					accent.R != '▁' || accent.FG != CWhite ||
+					accent.R != buttonAccentGlyph || accent.FG != CWhite ||
 					accent.BG != CDefault {
 					t.Fatalf("color=%d selected=%t: body=%+v accent=%+v",
 						color, selected, body, accent)
@@ -36,7 +36,7 @@ func TestAuthButtonHoverClearsTopQuarter(t *testing.T) {
 				accent := canvasAt(canvas, x, 6)
 				if top.R != ' ' || top.FG != CDefault || top.BG != CDefault ||
 					body.FG != CWhite || body.BG != CDefault ||
-					accent.R != '▃' || accent.FG != CWhite ||
+					accent.R != buttonAccentGlyph || accent.FG != CWhite ||
 					accent.BG != CDefault {
 					t.Fatalf("color=%d selected=%t: top=%+v body=%+v accent=%+v",
 						color, selected, top, body, accent)

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/miguelmnts/lazybw-go/internal/bitwarden"
 	"github.com/miguelmnts/lazybw-go/internal/vault"
 )
 
@@ -83,28 +84,66 @@ func TestPopupFooterKeepsBothKeyAndActionLeftAligned(t *testing.T) {
 	assertFooterHintPairs(t, c, a.hints(), x, y)
 }
 
-// TestDialogFooterCentersBothKeyAndAction checks the dialog footer layout.
-func TestDialogFooterCentersBothKeyAndAction(t *testing.T) {
-	s := setup(t)
-	defer s.CLI.Cipher.Close()
-	s.Mode = DialogCreate
-	a := New(s)
-	c := NewCanvas(120, 44)
-	const x, y, w = 1, 42, 118
-	a.footer(c, x, y, w)
+func TestPopupOverlayPreservesLeftAlignedWorkspaceFooter(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		popup *Popup
+	}{
+		{
+			name: "paginated confirmation",
+			popup: &Popup{Title: "Confirm", Question: "Continue?", Lines: []string{
+				"one", "two", "three", "four", "five", "six",
+				"seven", "eight", "nine", "ten", "eleven",
+			}},
+		},
+		{
+			name: "remote review",
+			popup: &Popup{
+				Lines:        []string{"remote change"},
+				RemoteReview: &bitwarden.RemoteReview{},
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			s := setup(t)
+			defer s.CLI.Cipher.Close()
+			s.Popup = testCase.popup
+			a := New(s)
+			c := NewCanvas(65, 19)
+			a.mainRender(c)
+			const x, y, w = 1, 17, 63
+			before := append([]Cell(nil), c.Cells[y*c.W:(y+1)*c.W]...)
 
-	hints := PaginateHints(a.hints(), max(18, 3*w/4))[0]
-	total := 0
-	for _, hint := range hints {
-		total += utf8.RuneCountInString(hint) + 3
+			a.popupRender(c)
+
+			for xx := 0; xx < c.W; xx++ {
+				if got := c.Cells[y*c.W+xx]; got != before[xx] {
+					t.Fatalf("popup changed footer cell x=%d: before=%#v after=%#v", xx, before[xx], got)
+				}
+			}
+			pages := PaginateHints(a.hints(), max(18, 3*w/4))
+			assertFooterHintPairs(t, c, pages[0][:1], x, y)
+		})
 	}
-	if total > 0 {
-		total -= 3
-	}
-	start := x + max(0, (max(18, 3*w/4)-total)/2)
-	assertFooterHintPairs(t, c, hints, start, y)
-	if cell := canvasAt(c, x, y); cell.R != ' ' {
-		t.Fatalf("dialog footer is not centered: %#v", cell)
+}
+
+// TestDialogFooterKeepsKeybindsLeftAligned checks every creation phase.
+func TestDialogFooterKeepsKeybindsLeftAligned(t *testing.T) {
+	for _, mode := range []Mode{
+		DialogCreate, DialogFieldType, DialogWebsite, DialogLinkedChoice,
+		DialogCardBrand, DialogIdentityTitle, DialogFoldersChoice,
+		DialogName, DialogField, DialogFolder, DialogReprompt,
+	} {
+		s := setup(t)
+		s.Mode = mode
+		a := New(s)
+		c := NewCanvas(120, 44)
+		const x, y, w = 1, 42, 118
+		a.footer(c, x, y, w)
+
+		hints := PaginateHints(a.hints(), max(18, 3*w/4))[0]
+		assertFooterHintPairs(t, c, hints, x, y)
+		s.CLI.Cipher.Close()
 	}
 }
 

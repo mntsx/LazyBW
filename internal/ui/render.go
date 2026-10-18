@@ -1058,20 +1058,6 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 		pages := PaginateHints(a.hints(), limit)
 		page := pages[s.HintPage%len(pages)]
 		startX := x
-		if s.Popup == nil && (s.Mode == DialogCreate || s.Mode == DialogFieldType ||
-			s.Mode == DialogWebsite || s.Mode == DialogLinkedChoice ||
-			s.Mode == DialogCardBrand || s.Mode == DialogIdentityTitle ||
-			s.Mode == DialogFoldersChoice || s.Mode == DialogName ||
-			s.Mode == DialogField || s.Mode == DialogFolder || s.Mode == DialogReprompt) {
-			total := 0
-			for _, hint := range page {
-				total += utf8.RuneCountInString(hint) + 3
-			}
-			if total > 0 {
-				total -= 3
-			}
-			startX += max(0, (limit-total)/2)
-		}
 		off := 0
 		for _, hint := range page {
 			if off >= limit {

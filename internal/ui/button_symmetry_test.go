@@ -19,11 +19,11 @@ func assertSymmetricButton(t *testing.T, canvas *Canvas, x, y, width int, label 
 		}
 	}
 	for offset := 0; offset < width; offset++ {
-		if cell := canvasAt(canvas, x+offset, y+1); cell.R != '▁' {
+		if cell := canvasAt(canvas, x+offset, y+1); cell.R != buttonAccentGlyph {
 			t.Fatalf("%q missing underline at x=%d: %+v", label, x+offset, cell)
 		}
 	}
-	if cell := canvasAt(canvas, x+width, y+1); cell.R == '▁' {
+	if cell := canvasAt(canvas, x+width, y+1); cell.R == buttonAccentGlyph {
 		t.Fatalf("%q extends past its right edge at x=%d", label, x+width)
 	}
 }

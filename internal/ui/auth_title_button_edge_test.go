@@ -68,7 +68,7 @@ func TestAuthButtonsEndAtTheirColoredBaseline(t *testing.T) {
 							screen, focused, x, top)
 					}
 					if textRow.BG != background || baseline.BG != background ||
-						baseline.FG != button.accent || baseline.R != '▃' {
+						baseline.FG != button.accent || baseline.R != buttonAccentGlyph {
 						t.Fatalf("screen=%v focus=%d x=%d: text=%+v baseline=%+v",
 							screen, focused, x, textRow, baseline)
 					}
@@ -102,7 +102,7 @@ func TestAuthButtonLabelsAreVerticallyCentered(t *testing.T) {
 							screen, focus, button.label, i, got)
 					}
 				}
-				if edge := canvasAt(c, labelX, g.buttonY+1); edge.R != '▃' {
+				if edge := canvasAt(c, labelX, g.buttonY+1); edge.R != buttonAccentGlyph {
 					t.Fatalf("the flush accent must run under the entire label: %+v", edge)
 				}
 			}

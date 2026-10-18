@@ -727,23 +727,38 @@ func (a *App) authField(c *Canvas, x, y, w int, hint, value string, focused, mas
 	// so no cell is overwritten by a simulated caret.
 }
 
-// authButton keeps the text in its original row. A quarter block adds
-// padding above it; the lower three-eighths block leaves five-eighths of the
-// lower row in the button background and uses three-eighths for the accent.
-func (a *App) authButton(c *Canvas, x, y, w int, label string, color int, selected, hover bool) {
-	bg, fg := buttonColors(color, selected, hover)
-	accent := buttonAccent(color, hover)
-	// A default foreground is the terminal TEXT color, not the global
-	// background. Hide the fractional cap on hover instead of drawing it
-	// in white; an empty cell inherits the real terminal background.
-	if hover {
-		c.Line(x, y-1, w, ' ', CDefault, CDefault)
-	} else {
-		c.Line(x, y-1, w, '▂', bg, CDefault)
+const (
+	buttonTopCapGlyph = '▂'
+	buttonAccentGlyph = '▃'
+)
+
+// buttonStyle centralizes the visual treatment shared by every button. Color
+// remains per-instance because it conveys each action's meaning.
+type buttonStyle struct {
+	color  int
+	topCap bool
+}
+
+func (style buttonStyle) draw(c *Canvas, x, y, w int, label string, selected, hover bool) {
+	bg, fg := buttonColors(style.color, selected, hover)
+	if style.topCap {
+		// A default foreground is the terminal TEXT color, not the global
+		// background. An empty cell inherits the real terminal background.
+		if hover {
+			c.Line(x, y-1, w, ' ', CDefault, CDefault)
+		} else {
+			c.Line(x, y-1, w, buttonTopCapGlyph, bg, CDefault)
+		}
 	}
 	c.Fill(x, y, w, 1, ' ', fg, bg)
 	c.Text(x+max(1, (w-len(label))/2), y, label, fg, bg)
-	c.Line(x, y+1, w, '▃', accent, bg)
+	c.Line(x, y+1, w, buttonAccentGlyph, buttonAccent(style.color, hover), bg)
+}
+
+// authButton adds the authentication form's fractional top padding to the
+// shared button design.
+func (a *App) authButton(c *Canvas, x, y, w int, label string, color int, selected, hover bool) {
+	buttonStyle{color: color, topCap: true}.draw(c, x, y, w, label, selected, hover)
 }
 
 // symmetricButtonWidth preserves equal whitespace on both sides of a label.
@@ -757,12 +772,12 @@ func symmetricButtonWidth(label string, requested int) int {
 	return width
 }
 
-// button preserves the original two-row geometry used by other dialogs.
+// button uses the shared design without the authentication form's top cap.
 func (a *App) button(c *Canvas, x, y, w int, label string, color int, selected, hover bool) {
-	a.drawButton(c, x, y, symmetricButtonWidth(label, w), 2, label, color, selected, hover)
+	buttonStyle{color: color}.draw(c, x, y, symmetricButtonWidth(label, w), label, selected, hover)
 }
 
-// drawButton paints the full rectangle, bottom accent, and centered label.
+// buttonColors derives the body palette from the button's interaction state.
 func buttonColors(color int, selected, hover bool) (int, int) {
 	if hover {
 		return CDefault, CWhite
@@ -781,15 +796,6 @@ func buttonAccent(color int, hover bool) int {
 	return color
 }
 
-func (a *App) drawButton(c *Canvas, x, y, w, height int, label string, color int, selected, hover bool) {
-	bg, fg := buttonColors(color, selected, hover)
-	// The accent stays in the last row of the filled rectangle, without a
-	// gap. An odd height lets the label occupy the exact central text row.
-	c.Fill(x, y, w, height, ' ', fg, bg)
-	c.Line(x, y+height-1, w, '▁', buttonAccent(color, hover), bg)
-	c.Text(x+max(1, (w-len(label))/2), y+(height-1)/2, label, fg, bg)
-}
-
 // drawDialogBorder draws a four-sided border without touching the content.
 func drawDialogBorder(c *Canvas, x, y, w, h int) {
 	if w < 2 || h < 2 {
@@ -805,6 +811,19 @@ func drawDialogBorder(c *Canvas, x, y, w, h int) {
 	c.Put(x+w-1, y, '┓', CBlue, CDefault)
 	c.Put(x, y+h-1, '┗', CBlue, CDefault)
 	c.Put(x+w-1, y+h-1, '┛', CBlue, CDefault)
+}
+
+func popupConfirmationButtonBounds(p *Popup, x, width int) (yesX, yesWidth, noX, noWidth int) {
+	yesLabel, noLabel := "YES", "NO"
+	if p.Quit {
+		yesLabel = "DISCARD AND QUIT"
+		noLabel = "CANCEL"
+	}
+	yesX = x + 4
+	yesWidth = symmetricButtonWidth(yesLabel, max(14, utf8.RuneCountInString(yesLabel)+4))
+	noX = x + width - max(17, utf8.RuneCountInString(noLabel)+6)
+	noWidth = symmetricButtonWidth(noLabel, max(13, utf8.RuneCountInString(noLabel)+4))
+	return
 }
 
 func (a *App) popupRender(c *Canvas) {
@@ -825,6 +844,9 @@ func (a *App) popupRender(c *Canvas) {
 	if len(p.Lines) > 10 {
 		height += 3 // Keep blank rows around pagination and above buttons.
 	}
+	// The workspace footer occupies the penultimate terminal row. Keep every
+	// popup above it, including paginated dialogs on the minimum screen size.
+	height = min(height, max(1, c.H-3))
 	x := (c.W - w) / 2
 	y := (c.H - height) / 2
 	a.dialogX, a.dialogY, a.dialogW, a.dialogH = x, y, w, height
@@ -903,12 +925,9 @@ func (a *App) popupRender(c *Canvas) {
 	if a.gui != nil {
 		mx, my = a.gui.MousePosition()
 	}
-	yesX := x + 4
-	yesWidth := symmetricButtonWidth(yesLabel, max(14, utf8.RuneCountInString(yesLabel)+4))
+	yesX, yesWidth, noX, noWidth := popupConfirmationButtonBounds(p, x, w)
 	a.button(c, yesX, buttonY, yesWidth, yesLabel, yes, p.Yes,
 		my >= buttonY && my <= buttonY+1 && mx >= yesX && mx < yesX+yesWidth)
-	noX := x + w - max(17, utf8.RuneCountInString(noLabel)+6)
-	noWidth := symmetricButtonWidth(noLabel, max(13, utf8.RuneCountInString(noLabel)+4))
 	a.button(c, noX, buttonY, noWidth, noLabel, no, !p.Yes,
 		my >= buttonY && my <= buttonY+1 && mx >= noX && mx < noX+noWidth)
 }
@@ -1086,6 +1105,11 @@ func (a *App) createRender(c *Canvas) {
 			title = "Field name"
 		}
 		a.authField(c, x+4, y+5, w-8, title, s.Input, s.FormFocus == 0, false)
+		if s.FormError != "" {
+			message := minWidth(s.FormError, w-8)
+			messageX := x + max(1, (w-utf8.RuneCountInString(message))/2)
+			c.Text(messageX, y+7, message, CRed, CDefault)
+		}
 		mx, my := -1, -1
 		if a.gui != nil {
 			mx, my = a.gui.MousePosition()
@@ -1353,7 +1377,8 @@ func (a *App) remoteReviewRender(c *Canvas) {
 	}
 	// The explanation starts exactly one empty row below the last entry
 	// (or the pagination line). The button row follows the explanation.
-	height := min(c.H-2, visible+18+pageRows)
+	// Reserve the workspace footer below even on the minimum terminal height.
+	height := min(max(1, c.H-3), visible+18+pageRows)
 	x, y := (c.W-w)/2, (c.H-height)/2
 	a.dialogX, a.dialogY, a.dialogW, a.dialogH = x, y, w, height
 	c.Fill(x, y, w, height, ' ', CWhite, CDefault)

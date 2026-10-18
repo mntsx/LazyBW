@@ -335,6 +335,9 @@ func (a *App) char(r rune) error {
 			return nil
 		}
 		s.Insert(r)
+		if s.Mode == DialogName || s.Mode == DialogFolder || s.Mode == DialogField {
+			s.FormError = ""
+		}
 		if s.Mode == Find {
 			s.Search = s.Input
 			s.recompute()
@@ -393,6 +396,7 @@ func (a *App) char(r rune) error {
 		case PaneItems:
 			s.NewType = 0
 			s.FormFocus = 0
+			s.FormError = ""
 			s.Mode = DialogCreate
 		case PaneFolders:
 			if s.LocalMode {
@@ -401,6 +405,7 @@ func (a *App) char(r rune) error {
 			s.Input = ""
 			s.Caret = 0
 			s.FormFocus = 0
+			s.FormError = ""
 			s.Mode = DialogFolder
 		case PaneContent:
 			if s.LocalMode || s.SelectedItem() == nil || !s.SelectedItem().CanEdit() {
@@ -410,6 +415,7 @@ func (a *App) char(r rune) error {
 			s.Caret = 0
 			s.CustomType = 0
 			s.FormFocus = 0
+			s.FormError = ""
 			s.Mode = DialogFieldType
 		}
 	case 'd':
@@ -889,6 +895,17 @@ func (a *App) keyboardEnter() error {
 	return nil
 }
 
+func creationNameError(mode Mode) string {
+	switch mode {
+	case DialogField:
+		return "Field name is required"
+	case DialogFolder:
+		return "Folder name is required"
+	default:
+		return "Item name is required"
+	}
+}
+
 func (a *App) enter() error {
 	s := a.S
 	if s.Mode == DialogReprompt {
@@ -966,6 +983,13 @@ func (a *App) enter() error {
 	if s.Busy {
 		return nil
 	}
+	if s.Mode == DialogName || s.Mode == DialogField || s.Mode == DialogFolder {
+		if s.FormFocus != 2 && strings.TrimSpace(s.Input) == "" {
+			s.FormError = creationNameError(s.Mode)
+			return nil
+		}
+		s.FormError = ""
+	}
 	switch s.Mode {
 	case DialogFoldersChoice:
 		it := s.SelectedItem()
@@ -1010,6 +1034,7 @@ func (a *App) enter() error {
 		}
 		s.Mode = DialogName
 		s.FormFocus = 0
+		s.FormError = ""
 		s.Input = ""
 		s.Caret = 0
 		return nil
@@ -1025,6 +1050,7 @@ func (a *App) enter() error {
 		}
 		s.Mode = DialogField
 		s.FormFocus = 0
+		s.FormError = ""
 		s.Input = ""
 		s.Caret = 0
 		return nil
@@ -1198,6 +1224,7 @@ func (a *App) escape() error {
 			s.ClearMaster()
 		}
 		s.Mode = Browse
+		s.FormError = ""
 		if s.Focus == PaneDetail {
 			s.ExitEdit()
 		}
@@ -1378,7 +1405,16 @@ func (a *App) clickAt(x, y int) error {
 				}
 				p.RemoteChoice = clicked
 			} else {
-				p.Yes = x < a.dialogX+a.dialogW/2
+				yesX, yesWidth, noX, noWidth := popupConfirmationButtonBounds(
+					p, a.dialogX, a.dialogW)
+				switch {
+				case x >= yesX && x < yesX+yesWidth:
+					p.Yes = true
+				case x >= noX && x < noX+noWidth:
+					p.Yes = false
+				default:
+					return nil
+				}
 			}
 			return a.enter()
 		}
@@ -1441,6 +1477,11 @@ func (a *App) clickAt(x, y int) error {
 			h := min(max(9, count+5), a.height()-4)
 			base = max(2, (a.height()-h)/2)
 		}
+		w := min(65, a.width()-6)
+		x0 := (a.width() - w) / 2
+		if x < x0+3 || x >= x0+w-3 {
+			return nil
+		}
 		idx := y - base - 3
 		if s.Mode == DialogWebsite || s.Mode == DialogFoldersChoice ||
 			s.Mode == DialogCardBrand || s.Mode == DialogIdentityTitle {
@@ -1478,18 +1519,28 @@ func (a *App) clickAt(x, y int) error {
 		x0 := (a.width() - w) / 2
 		cy := max(2, (a.height()-16)/2)
 		if y >= cy+10 && y <= cy+11 {
-			if x < x0+w/2 {
+			submitX := x0 + 9
+			submitWidth := symmetricButtonWidth("SUBMIT", 16)
+			cancelX := x0 + w - 26
+			cancelWidth := symmetricButtonWidth("CANCEL", 16)
+			switch {
+			case x >= submitX && x < submitX+submitWidth:
 				s.FormFocus = 1
-			} else {
+			case x >= cancelX && x < cancelX+cancelWidth:
 				s.FormFocus = 2
+			default:
+				return nil
 			}
 			return a.enter()
 		}
-		if y == cy+5 {
+		if y == cy+5 && x >= x0+4 && x < x0+w-4 {
 			s.FormFocus = 0
 			s.Caret = min(len([]rune(s.Input)), max(0, x-x0-4))
-			return nil
 		}
+		return nil
+	}
+	if s.Mode == DialogReprompt {
+		return nil
 	}
 	if s.Mode == Edit {
 		return nil
