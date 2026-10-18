@@ -1160,8 +1160,8 @@ func paneForNumber(s *State, number int) Pane {
 	return 0
 }
 
-// panelNavigationHints only advertises numeric shortcuts for rendered panels.
-// It includes the focused number separately as a back-navigation shortcut.
+// panelNavigationHints only advertises configured shortcuts for rendered panels.
+// It includes the focused panel key separately as a back-navigation shortcut.
 func panelNavigationHints(s *State) []string {
 	if s.Mode == Edit && s.Focus == PaneDetail {
 		return nil
@@ -1173,15 +1173,24 @@ func panelNavigationHints(s *State) []string {
 	if s.SelectedID != "" && s.Focus >= PaneContent {
 		panes = append(panes, PaneContent)
 	}
-	numbers := make([]string, 0, len(panes)-1)
+	actions := map[Pane]string{
+		PaneVault: "focus_my_vault", PaneTypes: "focus_item_types",
+		PaneFolders: "focus_folders", PaneChanges: "focus_changes",
+		PaneItems: "focus_items", PaneContent: "focus_content",
+	}
+	keys := make([]string, 0, len(panes)-1)
 	for _, pane := range panes {
 		if pane != s.Focus {
-			numbers = append(numbers, fmt.Sprint(panelNumber(s, pane)))
+			if key := s.Config.Key("global", actions[pane]); key != "" {
+				keys = append(keys, hintLabel(key))
+			}
 		}
 	}
-	out := []string{strings.Join(numbers, "/") + " panels"}
+	out := []string{strings.Join(keys, "/") + " panels"}
 	if s.Focus != PaneItems {
-		out = append(out, fmt.Sprintf("%d return", panelNumber(s, s.Focus)))
+		if key := s.Config.Key("global", actions[s.Focus]); key != "" {
+			out = append(out, hintLabel(key)+" return")
+		}
 	}
 	return out
 }

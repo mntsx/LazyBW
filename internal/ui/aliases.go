@@ -8,119 +8,111 @@ import (
 	"github.com/miguelmnts/lazybw-go/internal/config"
 )
 
-// Configured alternatives are registered in addition to the prototype's
-// standard bindings so that personal keymaps remain usable after migration.
-func (a *App) bindAliases(g *gocui.Gui) error {
-	type alias struct {
-		section, action, original string
-		fn                        func() error
+type configuredBinding struct {
+	section, action string
+	fn              func() error
+}
+
+func normalizedBindingKey(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch name {
+	case "esc":
+		return "escape"
+	case "ctrl+j":
+		return "ctrl+enter"
 	}
-	aliases := []alias{
-		{"global", "quit", "ctrl+q", func() error { a.requestQuit(); return nil }},
-		{"global", "push_all", "ctrl+p", func() error { a.confirmStage(true, true); return nil }},
-		{"global", "sync", "ctrl+s", func() error { a.checkRemote(); return nil }},
-		{"global", "focus_content", "6", func() error { return a.char('6') }},
-		{"global", "hint_next_page", "?", func() error { return a.char('?') }},
-		{"global", "discard_all", "ctrl+d", func() error { a.confirmStage(false, true); return nil }},
-		{"global", "focus_my_vault", "1", func() error { return a.char('1') }},
-		{"global", "focus_item_types", "2", func() error { return a.char('2') }},
-		{"global", "focus_folders", "3", func() error { return a.char('3') }},
-		{"global", "focus_changes", "4", func() error { return a.char('4') }},
-		{"global", "focus_items", "5", func() error { return a.char('5') }},
-		{"authentication", "next", "down", func() error { return a.arrow(1, 0) }},
-		{"authentication", "previous", "up", func() error { return a.arrow(-1, 0) }},
-		{"authentication", "button_left", "left", func() error { return a.arrow(0, -1) }},
-		{"authentication", "button_right", "right", func() error { return a.arrow(0, 1) }},
-		{"items", "search", "f", func() error { return a.char('f') }},
-		{"items", "delete", "d", func() error { return a.char('d') }},
-		{"items", "new", "n", func() error { return a.char('n') }},
-		{"edits", "save", "s", func() error { return a.char('s') }},
-		{"edits", "discard", "d", func() error { return a.char('d') }},
-		{"content", "copy", "c", func() error { return a.char('c') }},
-		{"content", "reveal", "r", func() error { return a.char('r') }},
-		{"content", "edit", "e", func() error { return a.char('e') }},
-		{"content", "switch", "s", func() error { return a.S.SwitchCheckbox() }},
-		{"content", "favorite", "f", func() error { return a.char('f') }},
-		{"folders", "new", "n", func() error { return a.char('n') }},
-		{"folders", "delete", "d", func() error { return a.char('d') }},
-		{"filters", "select", "enter", a.enter},
-		{"items", "open", "right", a.enter},
-		{"edits", "save", "s", a.enter},
-		{"content", "open_detail", "right", a.enter},
-		{"content", "new_field", "n", func() error { return a.char('n') }},
-		{"content", "delete_field", "d", func() error { return a.char('d') }},
-		{"folder_selector_popup", "switch", "s", func() error { return a.char('s') }},
-		{"sync_popup", "soft_sync", "s", func() error { return a.char('s') }},
-		{"sync_popup", "hard_sync", "h", func() error { return a.char('h') }},
-		{"sync_popup", "abort", "a", func() error { return a.char('a') }},
-		{"confirmation_popup", "accept", "y", func() error { return a.char('y') }},
-		{"confirmation_popup", "reject", "n", func() error { return a.char('n') }},
-	}
-	// Every action in the generated JSONC has a dispatcher. Users may add
-	// alternative bindings without changing the built-in terminal controls.
+	return name
+}
+
+// configuredBindings groups every configured action by key. Unlike the old
+// alias layer, configured keys replace defaults instead of being merely added
+// around a permanently registered hard-coded keymap.
+func (a *App) configuredBindings() map[string][]configuredBinding {
+	byKey := make(map[string][]configuredBinding)
 	for section, actions := range config.DefaultKeybinds {
-		for action, bindings := range actions {
+		for action := range actions {
+			keys := a.S.Config.Keys(section, action)
 			handler := a.configuredShortcut(section, action)
 			if handler == nil {
 				continue
 			}
-			original := ""
-			if len(bindings) > 0 {
-				original = bindings[0]
+			for _, name := range keys {
+				name = normalizedBindingKey(name)
+				if name != "" {
+					byKey[name] = append(byKey[name], configuredBinding{section, action, handler})
+				}
 			}
-			aliases = append(aliases, alias{section, action, original, handler})
 		}
 	}
-	// Track the built-in occupied keys to avoid replacing their callbacks.
-	occupied := map[string]bool{"up": true, "down": true, "left": true, "right": true, "enter": true, "escape": true, "backspace": true, "delete": true, "home": true, "end": true, "ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true, "ctrl+r": true, "ctrl+j": true, "ctrl+w": true, "ctrl+left": true, "ctrl+right": true, "ctrl+backspace": true, "ctrl+delete": true, "tab": true, "?": true}
-	for _, r := range "12345fndrcesh" {
-		occupied[string(r)] = true
-	}
-	byKey := make(map[string][]alias)
-	for _, entry := range aliases {
-		for _, name := range a.S.Config.Keys(entry.section, entry.action) {
-			name = strings.ToLower(strings.TrimSpace(name))
-			if name == "" || occupied[name] {
-				continue
-			}
-			byKey[name] = append(byKey[name], entry)
+	return byKey
+}
+
+func (a *App) dispatchConfiguredKey(name string) (bool, error) {
+	name = normalizedBindingKey(name)
+	for _, binding := range a.configuredBindings()[name] {
+		if !a.aliasAvailable(binding.section, binding.action) {
+			continue
 		}
+		before := a.feedbackState()
+		deferredSubmit := name == "enter" && configuredSubmitAction(binding.action) &&
+			a.keyboardSubmitTarget() != submitFlashNone && a.gui != nil
+		var err error
+		if name == "enter" && configuredSubmitAction(binding.action) {
+			err = a.keyboardEnter()
+		} else {
+			err = binding.fn()
+		}
+		if a.exitRequested.Load() {
+			return true, a.quitResult(err)
+		}
+		action := aliasActionName(binding.section, binding.action)
+		if err != nil || !deferredSubmit && feedbackRequiresChange(action) && a.feedbackState() == before {
+			action = "unbound"
+		}
+		a.reportKey(hintLabel(name), action)
+		return true, err
 	}
-	for name, choices := range byKey {
+	return false, nil
+}
+
+func configuredSubmitAction(action string) bool {
+	switch action {
+	case "submit", "confirm", "select", "apply", "open", "save":
+		return true
+	}
+	return false
+}
+
+// bindAliases registers configured keys that have no native editing callback.
+// Native keys call dispatchConfiguredKey themselves before their text fallback.
+func (a *App) bindAliases(g *gocui.Gui) error {
+	native := map[string]bool{
+		"up": true, "down": true, "left": true, "right": true,
+		"enter": true, "escape": true, "esc": true, "backspace": true,
+		"delete": true, "home": true, "end": true, "tab": true,
+		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
+		"ctrl+r": true, "ctrl+j": true, "ctrl+enter": true, "ctrl+w": true,
+	}
+	for name := range a.configuredBindings() {
+		if native[name] {
+			continue
+		}
 		key, ok := parseKey(name)
 		if !ok {
 			continue
 		}
 		label := name
-		options := choices
 		if err := g.SetKeybinding("", key, gocui.ModNone,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				if a.textEntryActive() {
-					return nil
+				handled, err := a.dispatchConfiguredKey(label)
+				if !handled && !a.textEntryActive() {
+					a.reportKey(hintLabel(label), "unbound")
 				}
-				for _, option := range options {
-					if !a.aliasAvailable(option.section, option.action) {
-						continue
-					}
-					before := a.feedbackState()
-					err := option.fn()
-					if a.exitRequested.Load() {
-						return a.quitResult(err)
-					}
-					actionName := aliasActionName(option.action)
-					if err != nil || feedbackRequiresChange(actionName) && a.feedbackState() == before {
-						actionName = "unbound"
-					}
-					a.reportKey(label, actionName)
-					return err
-				}
-				a.reportKey(label, "unbound")
-				return nil
+				return err
 			}); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -146,8 +138,11 @@ func (a *App) aliasAvailable(section, action string) bool {
 	if section == "folder_selector_popup" {
 		return s.Mode == DialogFoldersChoice
 	}
-	if section == "authentication" || section == "master_password" {
-		return s.Screen == AuthClient || s.Screen == AuthMaster
+	if section == "authentication" {
+		return s.Screen == AuthClient
+	}
+	if section == "master_password" {
+		return s.Screen == AuthMaster
 	}
 	if section == "authentication_offline" {
 		return (s.Screen == AuthClient || s.Screen == AuthMaster) && !s.ServerConnected
@@ -310,13 +305,44 @@ func (a *App) configuredShortcut(section, action string) func() error {
 	case "newline":
 		return func() error { a.S.Insert('\n'); return nil }
 	}
-	focus := map[string]rune{
-		"focus_my_vault": '1', "focus_item_types": '2',
-		"focus_folders": '3', "focus_changes": '4',
-		"focus_items": '5', "focus_content": '6',
+	focus := map[string]Pane{
+		"focus_my_vault": PaneVault, "focus_item_types": PaneTypes,
+		"focus_folders": PaneFolders, "focus_changes": PaneChanges,
+		"focus_items": PaneItems, "focus_content": PaneContent,
 	}
-	if r, ok := focus[action]; ok {
-		return func() error { return a.char(r) }
+	if pane, ok := focus[action]; ok {
+		return func() error { return a.focusConfiguredPane(pane) }
+	}
+	return nil
+}
+
+func (a *App) focusConfiguredPane(pane Pane) error {
+	s := a.S
+	if pane == s.Focus {
+		if pane == PaneContent {
+			s.CloseItem()
+		} else if pane != PaneItems {
+			s.Focus = PaneItems
+		}
+		return nil
+	}
+	if pane > PaneItems && (pane != PaneContent || s.SelectedID == "") {
+		return nil
+	}
+	if pane == PaneContent {
+		if item := s.SelectedItem(); item != nil &&
+			(item.Raw["reprompt"] == 1 || item.Raw["reprompt"] == float64(1)) &&
+			s.RepromptApprovedID != item.ID() {
+			a.startReprompt(item.ID())
+			return nil
+		}
+	}
+	s.Focus = pane
+	if pane <= PaneChanges {
+		s.RepromptApprovedID = ""
+	}
+	if pane == PaneChanges {
+		s.ChangeIndex = min(s.ChangeIndex, max(0, len(s.ChangesList())-1))
 	}
 	return nil
 }
@@ -366,28 +392,61 @@ func parseKey(s string) (interface{}, bool) {
 // Defaults documents the actions read from the existing JSONC keymap.
 var Defaults = config.DefaultKeybinds
 
-// aliasActionName renders a configured keybinding action in footer terminology.
-func aliasActionName(action string) string {
-	switch {
-	case strings.HasPrefix(action, "focus_"):
+// aliasActionName renders every configured action in footer terminology.
+func aliasActionName(section, action string) string {
+	if strings.HasPrefix(action, "focus_") {
 		return "panels"
-	case strings.HasPrefix(action, "save"):
-		return "push"
-	case strings.HasPrefix(action, "discard"):
-		return "discard"
-	case strings.HasPrefix(action, "delete"):
-		return "delete"
-	case strings.HasPrefix(action, "new"):
-		return "new"
 	}
 	switch action {
 	case "previous", "next", "button_left", "button_right":
 		return "move"
+	case "submit", "select":
+		return "select"
+	case "confirm", "accept", "reject":
+		return "confirm"
+	case "cancel":
+		return "cancel"
+	case "return_to_items", "leave":
+		return "return"
+	case "back":
+		if section == "detail" {
+			return "cancel"
+		}
+		return "return"
+	case "apply":
+		return "apply"
+	case "open":
+		return "open"
+	case "save":
+		if section == "detail" {
+			return "apply"
+		}
+		return "push"
+	case "push_all":
+		return "push"
+	case "discard", "discard_all":
+		return "discard"
+	case "delete", "delete_field":
+		return "delete"
+	case "new", "new_field":
+		return "new"
 	case "search":
 		return "find"
-	case "switch":
-		return "switch"
-	case "copy", "edit", "reveal", "quit":
+	case "favorite":
+		return "favourite"
+	case "reveal", "reveal_secret", "reveal_password":
+		return "reveal"
+	case "sync", "soft_sync", "hard_sync":
+		return "synchronize"
+	case "abort":
+		return "cancel"
+	case "server":
+		return "server"
+	case "hint_next_page", "next_page":
+		return "next page"
+	case "newline":
+		return "newline"
+	case "switch", "copy", "edit", "quit":
 		return action
 	}
 	return "unbound"

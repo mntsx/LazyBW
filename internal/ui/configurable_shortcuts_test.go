@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/awesome-gocui/gocui"
+	"github.com/miguelmnts/lazybw-go/internal/config"
 	"github.com/miguelmnts/lazybw-go/internal/vault"
 )
 
@@ -33,6 +35,85 @@ func TestConfiguredHintUsesFirstKeyOfList(t *testing.T) {
 	hints := strings.Join(New(s).hints(), " ")
 	if !strings.Contains(hints, "v switch") || strings.Contains(hints, "right switch") {
 		t.Fatalf("first configured key not shown: %q", hints)
+	}
+}
+
+func TestConfiguredKeyReplacesBuiltInCharacter(t *testing.T) {
+	s := setup(t)
+	s.Screen = Workspace
+	s.Busy = false
+	s.Focus = PaneItems
+	s.Config.Keybinds = map[string]map[string][]string{
+		"items": {"search": {"x"}},
+	}
+	a := New(s)
+
+	a.editEvent(nil, 0, 'f', gocui.ModNone)
+	if s.Mode != Browse {
+		t.Fatal("the former built-in search key ignored the configured replacement")
+	}
+	if s.KeyFeedbackAction != "unbound" {
+		t.Fatalf("removed key feedback = %q; want unbound", s.KeyFeedbackAction)
+	}
+	a.editEvent(nil, 0, 'x', gocui.ModNone)
+	if s.Mode != Find {
+		t.Fatal("the configured search key did not open Find")
+	}
+	if s.KeyFeedbackAction != "find" {
+		t.Fatalf("configured search feedback = %q; want find", s.KeyFeedbackAction)
+	}
+}
+
+func TestEveryConfiguredActionHasFeedbackName(t *testing.T) {
+	for section, actions := range config.DefaultKeybinds {
+		for action := range actions {
+			if got := aliasActionName(section, action); got == "unbound" {
+				t.Errorf("keybinds.%s.%s has no feedback name", section, action)
+			}
+		}
+	}
+}
+
+func TestBusyHintsUseConfiguredGlobalKeys(t *testing.T) {
+	s := setup(t)
+	s.Screen = Workspace
+	s.ServerConnected = true
+	s.Busy = true
+	s.Config.Keybinds = map[string]map[string][]string{
+		"global": {"sync": {"x"}},
+	}
+	hints := strings.Join(New(s).hints(), " ")
+	if !strings.Contains(hints, "x sync") || strings.Contains(hints, "ctrl+s sync") {
+		t.Fatalf("busy footer ignored configured sync key: %q", hints)
+	}
+}
+
+func TestFilterSelectionPrefersLeftAndKeepsEnter(t *testing.T) {
+	s := setup(t)
+	s.Screen = Workspace
+	s.Busy = false
+	s.Focus = PaneTypes
+	s.Filters[1] = 2
+	a := New(s)
+
+	if handled, err := a.dispatchConfiguredKey("left"); err != nil || !handled {
+		t.Fatalf("left filter binding: handled=%t err=%v", handled, err)
+	}
+	if s.FilterType != 2 {
+		t.Fatal("left did not activate the selected filter")
+	}
+	if s.KeyFeedbackAction != "select" {
+		t.Fatalf("left filter feedback = %q; want select", s.KeyFeedbackAction)
+	}
+	s.Filters[1] = 3
+	if handled, err := a.dispatchConfiguredKey("enter"); err != nil || !handled {
+		t.Fatalf("enter filter binding: handled=%t err=%v", handled, err)
+	}
+	if s.FilterType != 3 {
+		t.Fatal("enter no longer activates the selected filter")
+	}
+	if s.KeyFeedbackAction != "select" {
+		t.Fatalf("enter filter feedback = %q; want select", s.KeyFeedbackAction)
 	}
 }
 

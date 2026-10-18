@@ -38,6 +38,29 @@ func TestDefaultFilesAndPrecedence(t *testing.T) {
 		t.Fatal("JSONC must take precedence")
 	}
 }
+func TestKeybindOverridesReplaceDefaults(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keybinds.jsonc"), []byte(`{
+		"items": {"search": ["x"]},
+		"global": {"sync": []}
+	}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Keys("items", "search"); len(got) != 1 || got[0] != "x" {
+		t.Fatalf("search override was merged with its old default: %v", got)
+	}
+	if got := cfg.Keys("global", "sync"); len(got) != 0 {
+		t.Fatalf("empty binding did not disable sync: %v", got)
+	}
+	if got := cfg.Keys("filters", "select"); len(got) != 2 || got[0] != "left" || got[1] != "enter" {
+		t.Fatalf("unexpected filter selection defaults: %v", got)
+	}
+}
+
 func TestLegacyFiles(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"colors":{"selection":"ansi_red"}}`), 0600)

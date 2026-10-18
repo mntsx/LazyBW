@@ -94,11 +94,11 @@ var DefaultKeybinds = map[string]map[string][]string{
 	},
 	"filters": {
 		"next": {"down"}, "previous": {"up"},
-		"select": {"enter"}, "return_to_items": {"escape", "left"},
+		"select": {"left", "enter"}, "return_to_items": {"escape"},
 	},
 	"folders": {
-		"next": {"down"}, "previous": {"up"}, "select": {"enter"},
-		"new": {"n"}, "delete": {"d"}, "return_to_items": {"left"},
+		"next": {"down"}, "previous": {"up"}, "select": {"left", "enter"},
+		"new": {"n"}, "delete": {"d"}, "return_to_items": {"escape"},
 	},
 	"items": {
 		"next": {"down"}, "previous": {"up"},
@@ -170,8 +170,16 @@ var DefaultKeybinds = map[string]map[string][]string{
 	},
 	"reprompt_popup": {"confirm": {"enter"}, "cancel": {"escape"},
 		"reveal_password": {"ctrl+r"}},
-	"name_popup":   {"confirm": {"enter"}, "cancel": {"escape"}},
-	"folder_popup": {"confirm": {"enter"}, "cancel": {"escape"}},
+	"name_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
+	"folder_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
+		"confirm": {"enter"}, "cancel": {"escape"},
+	},
 }
 
 // NormalizeJSONC strips comments and trailing commas outside quoted strings.
@@ -388,12 +396,17 @@ func Load(dir string) (Config, error) {
 
 // Keys returns every configured binding for an action, in display order.
 func (c Config) Keys(section, action string) []string {
-	return append([]string(nil), c.Keybinds[section][action]...)
+	if actions, ok := c.Keybinds[section]; ok {
+		if bindings, ok := actions[action]; ok {
+			return append([]string(nil), bindings...)
+		}
+	}
+	return append([]string(nil), DefaultKeybinds[section][action]...)
 }
 
 // Key returns the preferred binding displayed in the footer.
 func (c Config) Key(section, action string) string {
-	bindings := c.Keybinds[section][action]
+	bindings := c.Keys(section, action)
 	if len(bindings) == 0 {
 		return ""
 	}

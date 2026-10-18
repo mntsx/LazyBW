@@ -505,7 +505,10 @@ func (a *App) serverPickerRender(c *Canvas) {
 			c.Text(x+6+utf8.RuneCountInString("Local Vault "), row, "(READ ONLY)", CRed, bg)
 		}
 	}
-	authHints(c, y+h-2, "↑/↓ move    ENTER select    esc cancel")
+	authHints(c, y+h-2, joinConfiguredHints(
+		a.configuredMoveHint("server_picker", false),
+		a.configuredHint("server_picker", "confirm", "select"),
+		a.configuredHint("server_picker", "cancel", "cancel")))
 }
 
 func (a *App) startupRender(c *Canvas) {
@@ -621,10 +624,15 @@ func (a *App) authRender(c *Canvas) {
 			s.AuthFocus == 3, hovered(g.quitX))
 	}
 
-	hints := "↑/↓ move    ENTER select    ctrl+r reveal    ctrl+s server"
-	if s.AuthFocus >= 2 {
-		hints = "↑/↓/←/→ move    ENTER select    ctrl+r reveal    ctrl+s server"
+	section, revealAction := "authentication", "reveal_secret"
+	if s.Screen == AuthMaster {
+		section, revealAction = "master_password", "reveal_password"
 	}
+	hints := joinConfiguredHints(
+		a.configuredMoveHint(section, s.AuthFocus >= 2),
+		a.configuredHint(section, "submit", "select"),
+		a.configuredHint(section, revealAction, "reveal"),
+		a.configuredHint(section, "server", "server"))
 
 	if !a.textEntryActive() && !s.KeyFeedbackExpires.IsZero() &&
 		time.Now().Before(s.KeyFeedbackExpires) {
@@ -921,7 +929,10 @@ func (a *App) createRender(c *Canvas) {
 		if s.RepromptError != "" {
 			c.Text(x+4, y+8, s.RepromptError, CRed, CDefault)
 		}
-		authHints(c, y+10, "ctrl+r reveal    ENTER confirm    Esc cancel")
+		authHints(c, y+10, joinConfiguredHints(
+			a.configuredHint("reprompt_popup", "reveal_password", "reveal"),
+			a.configuredHint("reprompt_popup", "confirm", "confirm"),
+			a.configuredHint("reprompt_popup", "cancel", "cancel")))
 		return
 	}
 	w := min(65, c.W-6)

@@ -76,26 +76,15 @@ func (a *App) hints() []string {
 			}
 		}
 	}
-	actionByHint := map[string]string{
-		"ENTER select": "select", "ENTER unselect": "select",
-		"ENTER apply": "confirm", "ENTER confirm": "confirm",
-		"ENTER OK": "confirm", "ENTER verify": "confirm",
-		"ENTER save": "save", "ENTER open": "open",
-		"e edit": "edit", "s switch": "switch", "f favourite": "favorite",
-		"n new": "new", "d delete": "delete", "f find": "search",
-		"c copy": "copy", "r reveal": "reveal", "s push": "save",
-		"d discard": "discard", "esc cancel": "cancel", "esc back": "back",
-		"esc close": "cancel", "← back": "back", "→ open": "open",
-		"s sync": "soft_sync", "s soft sync": "soft_sync",
-		"h hard sync": "hard_sync", "a abort sync": "abort",
-		"? next page": "next_page",
-	}
+
 	for i, label := range hints {
 		if label == "↑/↓ move" {
 			previous := s.Config.Key(section, "previous")
 			next := s.Config.Key(section, "next")
 			if previous != "" && next != "" {
 				hints[i] = hintLabel(previous) + "/" + hintLabel(next) + " move"
+			} else {
+				hints[i] = ""
 			}
 			continue
 		}
@@ -108,6 +97,8 @@ func (a *App) hints() []string {
 					verb = "move"
 				}
 				hints[i] = hintLabel(previous) + "/" + hintLabel(next) + " " + verb
+			} else {
+				hints[i] = ""
 			}
 			continue
 		}
@@ -119,10 +110,12 @@ func (a *App) hints() []string {
 			}[label]
 			if key := s.Config.Key("global", action); key != "" {
 				hints[i] = hintLabel(key) + " " + strings.SplitN(label, " ", 2)[1]
+			} else {
+				hints[i] = ""
 			}
 			continue
 		}
-		action := actionByHint[label]
+		action := configuredHintAction(section, label)
 		if action == "" {
 			continue
 		}
@@ -131,7 +124,135 @@ func (a *App) hints() []string {
 			if len(parts) == 2 {
 				hints[i] = hintLabel(key) + " " + parts[1]
 			}
+		} else {
+			hints[i] = ""
 		}
 	}
-	return hints
+	visible := hints[:0]
+	for _, hint := range hints {
+		if hint != "" && hint != " panels" {
+			visible = append(visible, hint)
+		}
+	}
+	return visible
+}
+
+func (a *App) configuredHint(section, action, verb string) string {
+	if key := a.S.Config.Key(section, action); key != "" {
+		return hintLabel(key) + " " + verb
+	}
+	return ""
+}
+
+func (a *App) configuredMoveHint(section string, horizontal bool) string {
+	keys := []string{
+		a.S.Config.Key(section, "previous"),
+		a.S.Config.Key(section, "next"),
+	}
+	if horizontal {
+		keys = append(keys,
+			a.S.Config.Key(section, "button_left"),
+			a.S.Config.Key(section, "button_right"))
+	}
+	labels := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key != "" {
+			labels = append(labels, hintLabel(key))
+		}
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	return strings.Join(labels, "/") + " move"
+}
+
+func joinConfiguredHints(hints ...string) string {
+	visible := hints[:0]
+	for _, hint := range hints {
+		if hint != "" {
+			visible = append(visible, hint)
+		}
+	}
+	return strings.Join(visible, "    ")
+}
+
+func configuredHintAction(section, label string) string {
+	switch label {
+	case "ENTER select", "ENTER unselect":
+		if section == "filters" || section == "folders" {
+			return "select"
+		}
+		return "confirm"
+	case "ENTER apply":
+		switch section {
+		case "search":
+			return "apply"
+		case "detail":
+			return "save"
+		default:
+			return "confirm"
+		}
+	case "ENTER confirm", "ENTER OK", "ENTER verify":
+		return "confirm"
+	case "ENTER save":
+		return "save"
+	case "ENTER open", "→ open":
+		return "open"
+	case "e edit":
+		return "edit"
+	case "s switch":
+		return "switch"
+	case "f favourite":
+		return "favorite"
+	case "n new":
+		return "new"
+	case "d delete":
+		return "delete"
+	case "f find":
+		return "search"
+	case "c copy":
+		return "copy"
+	case "r reveal":
+		return "reveal"
+	case "ctrl+r reveal":
+		if section == "reprompt_popup" {
+			return "reveal_password"
+		}
+		return "reveal"
+	case "ctrl+ENTER newline":
+		return "newline"
+	case "s push":
+		return "save"
+	case "d discard":
+		return "discard"
+	case "y yes":
+		return "accept"
+	case "n no":
+		return "reject"
+	case "esc cancel":
+		if section == "detail" {
+			return "back"
+		}
+		return "cancel"
+	case "c cancel":
+		return "cancel"
+	case "esc back":
+		return "leave"
+	case "esc close":
+		if section == "sync_popup" {
+			return "abort"
+		}
+		return "cancel"
+	case "← back":
+		return "back"
+	case "s sync", "s soft sync":
+		return "soft_sync"
+	case "h hard sync":
+		return "hard_sync"
+	case "a abort sync":
+		return "abort"
+	case "? next page":
+		return "next_page"
+	}
+	return ""
 }
