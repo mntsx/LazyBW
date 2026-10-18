@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Kind string
@@ -21,6 +22,7 @@ type Change struct {
 	Entity, Key, Name, TypeName string
 	Kind                        Kind
 	Before, After               map[string]any
+	ChangedAt                   time.Time
 }
 type Stage struct {
 	mu      sync.RWMutex
@@ -34,6 +36,12 @@ func LocalID() string              { return fmt.Sprintf("local-%d", tempCounter.
 func NewStage() *Stage             { return &Stage{changes: make(map[string]*Change)} }
 func Key(entity, id string) string { return entity + ":" + id }
 func (s *Stage) Record(entity string, current map[string]any, typeName string, original map[string]map[string]any) {
+	s.RecordAt(entity, current, typeName, original, time.Now())
+}
+
+// RecordAt preserves the creation time of a new local entity while updating
+// the timestamp of each subsequent modification to an existing remote entity.
+func (s *Stage) RecordAt(entity string, current map[string]any, typeName string, original map[string]map[string]any, changedAt time.Time) {
 	id := stringValue(current["id"])
 	key := Key(entity, id)
 	s.mu.Lock()
@@ -41,6 +49,9 @@ func (s *Stage) Record(entity string, current map[string]any, typeName string, o
 	old := original[id]
 	if prev := s.changes[key]; prev != nil {
 		old = prev.Before
+		if prev.Kind == New {
+			changedAt = prev.ChangedAt
+		}
 	}
 	if equalValue(old, current) {
 		s.removeLocked(key)
@@ -49,11 +60,14 @@ func (s *Stage) Record(entity string, current map[string]any, typeName string, o
 	if s.changes[key] == nil {
 		s.order = append(s.order, key)
 	}
+	if changedAt.IsZero() {
+		changedAt = time.Now()
+	}
 	kind := Modified
 	if old == nil {
 		kind = New
 	}
-	s.changes[key] = &Change{Entity: entity, Key: key, Kind: kind, Name: stringValue(current["name"]), TypeName: typeName, Before: copyOpt(old), After: Clone(current)}
+	s.changes[key] = &Change{Entity: entity, Key: key, Kind: kind, Name: stringValue(current["name"]), TypeName: typeName, Before: copyOpt(old), After: Clone(current), ChangedAt: changedAt}
 }
 func (s *Stage) Delete(entity, id, typeName string, original map[string]map[string]any) {
 	key := Key(entity, id)

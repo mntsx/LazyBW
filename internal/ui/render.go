@@ -835,13 +835,53 @@ func contentStartIndex(fields []vault.Field, selected, available int) int {
 	return first + 1
 }
 
+const minuteTimestampLayout = "2006-01-02T15:04"
+
+func itemModifiedTimestamp(s *State, item *vault.Item) (string, int, bool) {
+	if item == nil {
+		return "", CWhite, true
+	}
+	if change := s.Stage.Get(vault.Key("item", item.ID())); change != nil &&
+		(change.Kind == vault.New || change.Kind == vault.Modified) && !change.ChangedAt.IsZero() {
+		color := CYellow
+		if change.Kind == vault.New {
+			color = CGreen
+		}
+		return change.ChangedAt.Format(minuteTimestampLayout), color, false
+	}
+	raw, _ := item.Raw["revisionDate"].(string)
+	if raw == "" {
+		return "", CWhite, true
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.Format(minuteTimestampLayout), CWhite, true
+		}
+	}
+	if len(raw) >= len(minuteTimestampLayout) {
+		raw = raw[:len(minuteTimestampLayout)]
+	}
+	return raw, CWhite, true
+}
+
 func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 	if w < 5 {
 		return
 	}
 	s := a.S
-	a.header(c, x, y, w, "Item content", "\uf0ce", PaneContent)
-	if item := s.SelectedItem(); item != nil && w >= 13 {
+	const title = "Last modified:"
+	a.header(c, x, y, w, title, "\uf0ce", PaneContent)
+	item := s.SelectedItem()
+	if timestamp, color, dim := itemModifiedTimestamp(s, item); timestamp != "" {
+		timestampX := x + 8 + utf8.RuneCountInString(title)
+		text := minWidth(timestamp, max(0, x+w-timestampX))
+		if dim {
+			c.TextDim(timestampX, y, text, color, CTitle)
+		} else {
+			c.Text(timestampX, y, text, color, CTitle)
+		}
+	}
+	if item != nil && w >= 13 {
 		if item.Favorite() {
 			c.TextBold(x+w-3, y, "\uf005", CBYellow, CTitle)
 		} else {

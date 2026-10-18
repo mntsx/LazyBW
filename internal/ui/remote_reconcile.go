@@ -224,7 +224,7 @@ func (s *State) ApplyRemoteReview(review *bitwarden.RemoteReview, track bool) {
 		if ch.Kind == vault.New {
 			value := clonedMap(ch.After)
 			destination[fmt.Sprint(value["id"])] = value
-			nextStage.Record(ch.Entity, value, ch.TypeName, originals)
+			nextStage.RecordAt(ch.Entity, value, ch.TypeName, originals, ch.ChangedAt)
 			continue
 		}
 		if remote == nil {
@@ -232,7 +232,7 @@ func (s *State) ApplyRemoteReview(review *bitwarden.RemoteReview, track bool) {
 				value := clonedMap(ch.After)
 				value["id"] = vault.LocalID()
 				destination[fmt.Sprint(value["id"])] = value
-				nextStage.Record(ch.Entity, value, ch.TypeName, originals)
+				nextStage.RecordAt(ch.Entity, value, ch.TypeName, originals, ch.ChangedAt)
 			}
 			continue
 		}
@@ -249,7 +249,7 @@ func (s *State) ApplyRemoteReview(review *bitwarden.RemoteReview, track bool) {
 		}
 		merged["id"] = remote["id"]
 		destination[fmt.Sprint(remote["id"])] = merged
-		nextStage.Record(ch.Entity, merged, ch.TypeName, originals)
+		nextStage.RecordAt(ch.Entity, merged, ch.TypeName, originals, ch.ChangedAt)
 	}
 	s.Stage = nextStage
 	{
