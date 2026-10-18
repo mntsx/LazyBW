@@ -78,6 +78,8 @@ type State struct {
 	ServerMoved                        bool
 	LocalMode                          bool
 	LocalOrigin                        string
+	LocalAlgorithm                     string
+	LocalReplicaCreated                string
 	LocalWarning                       string
 	ServerConnected                    bool
 	LocalSession                       *localvault.Session

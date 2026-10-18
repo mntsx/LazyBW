@@ -567,32 +567,45 @@ func (a *App) authRender(c *Canvas) {
 		serverDomain = "bitwarden.eu"
 	}
 	label := strings.ToUpper(s.Server) + " (" + serverDomain + ")"
-	cryptoLabel := "cipher: AES-256-GCM / " + s.CLI.Cipher.Backend()
-	cryptoX := c.W - 2 - utf8.RuneCountInString(cryptoLabel)
+	rightLabel := "cipher: AES-256-GCM / " + s.CLI.Cipher.Backend()
+	if s.LocalMode {
+		rightLabel = "\U000F01DA"
+		if s.LocalReplicaCreated != "" {
+			rightLabel += " " + s.LocalReplicaCreated
+		}
+	}
+	rightX := c.W - 2 - utf8.RuneCountInString(rightLabel)
 	if s.LocalMode {
 		path := localvault.FilePath(s.Config.Local.VaultPath)
-		alg := "unknown"
-		if h, err := localvault.Inspect(s.Config.Local.VaultPath); err == nil {
-			alg = h.Algorithm
+		algorithm := s.LocalAlgorithm
+		if algorithm == "" {
+			algorithm = "unknown"
 		}
-		full := "Local (" + path + ") " + alg
-		if 4+utf8.RuneCountInString(full)+2 < cryptoX {
+		full := "Local (" + path + ") " + algorithm
+		if 4+utf8.RuneCountInString(full)+2 < rightX {
 			c.Text(4, 1, full, CWhite, CDefault)
 		} else {
 			c.Text(4, 1, "Local", CWhite, CDefault)
-			second := "(" + path + ") " + alg
+			second := "(" + path + ") " + algorithm
 			if 4+utf8.RuneCountInString(second) < c.W-2 {
 				c.Text(4, 2, second, CWhite, CDefault)
 			} else {
 				c.Text(4, 2, minWidth("("+path+")", c.W-6), CWhite, CDefault)
-				c.Text(4, 3, alg, CWhite, CDefault)
+				c.Text(4, 3, algorithm, CWhite, CDefault)
 			}
 		}
 	} else {
 		c.Text(4, 1, label, CWhite, CDefault)
 	}
-	if cryptoX > 4+len("Local")+2 && (s.LocalMode || cryptoX > 4+len(label)+2) {
-		c.Text(cryptoX, 1, cryptoLabel, CWhite, CDefault)
+	if rightX > 4+len("Local")+2 && (s.LocalMode || rightX > 4+len(label)+2) {
+		if s.LocalMode {
+			c.Text(rightX, 1, "\U000F01DA", CBlue, CDefault)
+			if s.LocalReplicaCreated != "" {
+				c.Text(rightX+2, 1, s.LocalReplicaCreated, CWhite, CDefault)
+			}
+		} else {
+			c.Text(rightX, 1, rightLabel, CWhite, CDefault)
+		}
 	}
 
 	// Anchor the informational heading to the upper input, not the screen.

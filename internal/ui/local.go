@@ -48,6 +48,18 @@ func (a *App) checkOfflineStartup(ctx context.Context) {
 	})
 }
 
+func formatReplicaTimestamp(created string) string {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, created); err == nil {
+			return parsed.Format(minuteTimestampLayout)
+		}
+	}
+	if len(created) >= len(minuteTimestampLayout) {
+		return created[:len(minuteTimestampLayout)]
+	}
+	return created
+}
+
 func (a *App) switchToLocal() {
 	s := a.S
 	s.Server = "local"
@@ -60,8 +72,13 @@ func (a *App) switchToLocal() {
 	s.ClearMaster()
 	s.Notice = ""
 	s.LocalWarning = ""
+	s.LocalOrigin = ""
+	s.LocalAlgorithm = ""
+	s.LocalReplicaCreated = ""
 	if h, err := localvault.Inspect(s.Config.Local.VaultPath); err == nil {
 		s.LocalOrigin = h.Origin
+		s.LocalAlgorithm = h.Algorithm
+		s.LocalReplicaCreated = formatReplicaTimestamp(h.Created)
 	}
 }
 
