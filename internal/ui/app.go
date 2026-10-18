@@ -17,6 +17,7 @@ import (
 	"github.com/miguelmnts/lazybw-go/internal/bitwarden"
 	"github.com/miguelmnts/lazybw-go/internal/localvault"
 	"github.com/miguelmnts/lazybw-go/internal/terminalkeys"
+	"github.com/miguelmnts/lazybw-go/internal/terminalsecurity"
 	"github.com/miguelmnts/lazybw-go/internal/vault"
 )
 
@@ -68,13 +69,30 @@ func (a *App) Run() error {
 	if err != nil {
 		return err
 	}
+	// tcell has already put the terminal in raw mode (no canonical buffering,
+	// echo, or signal-generating control characters). Reject later opens of the
+	// same TTY while the UI is active as an additional best-effort barrier.
+	releaseTTY := terminalsecurity.ProtectTTY()
 	// DECSCUSR: blinking bar cursor on terminals that support it (Alacritty).
 	_, _ = os.Stdout.Write([]byte("\x1b[5 q"))
+	var terminalCleanupOnce sync.Once
+	terminalCleanup := func() {
+		terminalCleanupOnce.Do(func() {
+			g.Close()
+			_, _ = os.Stdout.Write([]byte("\x1b[0 q"))
+			releaseTTY()
+		})
+	}
+	stopSignals := terminalsecurity.RestoreOnTermination(terminalCleanup)
+	defer stopSignals()
+	defer terminalCleanup()
 	a.gui = g
 	if err := a.S.ProtectMaster(); err != nil {
 		return err
 	}
 	defer func() {
+		// Restore terminal state before the potentially slow bw lock cleanup.
+		terminalCleanup()
 		a.S.ClearMaster()
 		if a.S.LocalSession != nil {
 			a.S.LocalSession.Close()
@@ -82,11 +100,6 @@ func (a *App) Run() error {
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancelClose()
 		a.S.CLI.Close(closeCtx)
-	}()
-	// Restore terminal state before the potentially slow bw lock cleanup.
-	defer func() {
-		g.Close()
-		_, _ = os.Stdout.Write([]byte("\x1b[0 q"))
 	}()
 	g.Mouse = true
 	g.Cursor = false

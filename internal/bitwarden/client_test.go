@@ -63,3 +63,19 @@ func TestSanitizedError(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestEnvironmentOverridesRemoveInheritedSecrets(t *testing.T) {
+	environment := overriddenEnvironment(
+		[]string{"PATH=/bin", "BW_SESSION=foreign", "LAZYBW_MASTER_PASSWORD=stale"},
+		[]string{"BW_SESSION=", "LAZYBW_MASTER_PASSWORD=current"},
+	)
+	joined := strings.Join(environment, "\n")
+	if strings.Contains(joined, "BW_SESSION=foreign") ||
+		strings.Contains(joined, "LAZYBW_MASTER_PASSWORD=stale") {
+		t.Fatalf("inherited secret survived override: %v", environment)
+	}
+	if !strings.Contains(joined, "PATH=/bin") ||
+		!strings.Contains(joined, "LAZYBW_MASTER_PASSWORD=current") {
+		t.Fatalf("expected environment entries are missing: %v", environment)
+	}
+}

@@ -110,6 +110,23 @@ In `settings.jsonc`, configure `local_replication`:
 
 All three use **Argon2id** ([`golang.org/x/crypto/argon2`](https://pkg.go.dev/golang.org/x/crypto/argon2)) to derive the encryption key from your master password. Replicas are updated from confirmed personal-vault data, exclude unsaved edits, and can be opened offline with the password used to encrypt them. **Local mode never writes to Bitwarden.**
 
+You can update the replica without opening the TUI:
+
+```bash
+lazybw replicate
+```
+
+This uses `vault_path`, `client_env_path`, `default_server`, and `vault_encryption` from `settings.jsonc`. The command performs a fresh Bitwarden sync and overwrites the replica atomically. It runs even when `save_vault` is `false`, because invoking the command explicitly requests one replication. Optional overrides are available:
+
+```bash
+lazybw replicate --path "$HOME/.local/share/lazybw/bw-vault" \
+  --client "$HOME/.config/lazybw/credentials.env"
+```
+
+- `--path`: destination file. An explicitly supplied filename must not have an extension.
+- `--client`: API credentials file. An explicitly supplied filename must have the `.env` extension.
+- `--password`: master password. If omitted, LazyBW reads it from the controlling terminal with echo disabled, so it is not added to shell history. Supplying a password on the command line is less secure because the shell may save it in history and other local processes may briefly see the argument.
+
 ![LazyBW vault interface and local mode](assets/screenshots/vault.png)
 
 ## Synchronize and review changes
@@ -139,6 +156,8 @@ LazyBW encrypts sensitive values held in its working state using **AES-256-GCM**
 - **Memory (fallback):** keeps the key in the process when the kernel keyring cannot be used, including on unsupported platforms.
 
 The key is revoked or cleared when the session closes, where practical. This reduces the time secrets remain exposed in application state; it **does not guarantee** that plaintext never appears transiently in process memory or when communicating with `bw`.
+
+For terminal input, `tcell` puts the TUI in raw mode, disabling terminal echo, canonical buffering, and signal-generating control characters. LazyBW does not log text-entry keystrokes in its key-feedback state. On Linux it also disables core dumps and ordinary same-user process inspection, and requests exclusive access to the TTY while the TUI or hidden password prompt is active. These are defense-in-depth measures: a privileged process, compromised terminal emulator, SSH host, multiplexer, or process that already owns the PTY can still observe input, which cannot be prevented from inside a terminal application.
 
 ## Development and maintenance
 

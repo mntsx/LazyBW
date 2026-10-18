@@ -39,6 +39,26 @@ func TestBlankMasterNeverCallsUnlock(t *testing.T) {
 	}
 }
 
+// TestTextEntryNeverRetainsKeyFeedback ensures typed secrets are not copied
+// into the TUI's temporary key-monitoring state.
+func TestTextEntryNeverRetainsKeyFeedback(t *testing.T) {
+	s := setup(t)
+	s.Screen = AuthMaster
+	s.AuthFocus = 0
+	s.Busy = false
+	a := New(s)
+	if err := a.handleKey("x", func() error { return a.char('x') }); err != nil {
+		t.Fatal(err)
+	}
+	if s.MasterText() != "x" {
+		t.Fatal("master-password input was not accepted")
+	}
+	if s.KeyFeedback != "" || s.KeyFeedbackAction != "" ||
+		!s.KeyFeedbackExpires.IsZero() || a.feedbackActive.Load() {
+		t.Fatal("text-entry key escaped into feedback monitoring")
+	}
+}
+
 // TestHintPageKeyDoesNotTriggerFooterFeedback checks silent pagination.
 func TestHintPageKeyDoesNotTriggerFooterFeedback(t *testing.T) {
 	s := setup(t)

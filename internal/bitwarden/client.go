@@ -30,9 +30,10 @@ func (r ExecRunner) Run(ctx context.Context, args []string, input []byte, extraE
 		binary = "bw"
 	}
 	cmd := exec.CommandContext(ctx, binary, args...)
-	// Explicit per-process environment overrides take precedence. Inherited
-	// Bitwarden session tokens must never leak into LazyBW profiles.
-	cmd.Env = append(os.Environ(), extraEnv...)
+	// Explicit per-process environment overrides take precedence. Remove
+	// inherited copies instead of relying on duplicate-variable semantics,
+	// which differ across runtimes used by bw.
+	cmd.Env = overriddenEnvironment(os.Environ(), extraEnv)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -97,6 +98,24 @@ func category(stderr []byte) string {
 	}
 }
 
+func overriddenEnvironment(inherited, overrides []string) []string {
+	keys := make(map[string]struct{}, len(overrides))
+	for _, value := range overrides {
+		if key, _, ok := strings.Cut(value, "="); ok {
+			keys[key] = struct{}{}
+		}
+	}
+	environment := make([]string, 0, len(inherited)+len(overrides))
+	for _, value := range inherited {
+		key, _, ok := strings.Cut(value, "=")
+		if _, replaced := keys[key]; ok && replaced {
+			continue
+		}
+		environment = append(environment, value)
+	}
+	return append(environment, overrides...)
+}
+
 type Client struct {
 	runner        Runner
 	mu            sync.Mutex
@@ -126,9 +145,10 @@ func (c *Client) call(ctx context.Context, op string, args []string, input []byt
 		vars = append(vars, "BITWARDENCLI_APPDATA_DIR="+profile)
 	}
 	// Clearing the inherited variable is essential even for status and login.
-	vars = append(vars, "BW_SESSION=")
 	if session && key != "" {
 		vars = append(vars, "BW_SESSION="+key)
+	} else {
+		vars = append(vars, "BW_SESSION=")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
 	defer cancel()

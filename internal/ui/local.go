@@ -7,6 +7,7 @@ import (
 	"github.com/awesome-gocui/gocui"
 	"github.com/miguelmnts/lazybw-go/internal/localvault"
 	"github.com/miguelmnts/lazybw-go/internal/network"
+	"github.com/miguelmnts/lazybw-go/internal/replica"
 	"github.com/miguelmnts/lazybw-go/internal/vault"
 )
 
@@ -321,31 +322,8 @@ func (a *App) backupWorker(ctx context.Context) {
 		})
 		started := time.Now()
 		jobCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		data := job.data
-		plain := localvault.Snapshot{Items: make([]map[string]any, 0, len(data.Items)), Folders: data.Folders}
-		var err error
-		for _, item := range data.Items {
-			var mapped map[string]any
-			mapped, err = vault.PlainMap(a.S.CLI.Cipher, item)
-			if err != nil {
-				break
-			}
-			delete(mapped, "_owner_name")
-			plain.Items = append(plain.Items, mapped)
-		}
-		if err == nil {
-			err = jobCtx.Err()
-		}
-		if err == nil {
-			var sealed []byte
-			sealed, err = job.session.Encode(plain, job.region, job.algorithm, time.Now())
-			if err == nil {
-				err = localvault.WriteAtomicContext(jobCtx, job.path, sealed)
-			}
-			for i := range sealed {
-				sealed[i] = 0
-			}
-		}
+		err := replica.Write(jobCtx, job.data, job.region, job.path,
+			job.algorithm, job.session, a.S.CLI.Cipher)
 		// Keep the spinner visible for fast snapshots.
 		if wait := 180*time.Millisecond - time.Since(started); wait > 0 {
 			time.Sleep(wait)
