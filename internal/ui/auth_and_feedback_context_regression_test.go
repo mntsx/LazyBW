@@ -69,8 +69,12 @@ func TestHintPageKeyDoesNotTriggerFooterFeedback(t *testing.T) {
 	}
 	a.reportKey("f", "find")
 	beforePage := s.HintPage
-	if err := a.handleKey("?", func() error { return a.char('?') }); err != nil {
+	handled, err := a.dispatchConfiguredKey("?")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("configured next-page key was not handled")
 	}
 	if !s.KeyFeedbackExpires.IsZero() || a.feedbackActive.Load() {
 		t.Fatal("hint pagination left temporary key feedback visible")

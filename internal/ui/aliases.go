@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/awesome-gocui/gocui"
@@ -66,6 +67,11 @@ func (a *App) dispatchConfiguredKey(name string) (bool, error) {
 			return true, a.quitResult(err)
 		}
 		action := aliasActionName(binding.section, binding.action)
+		if action == "next page" {
+			a.S.KeyFeedbackExpires = time.Time{}
+			a.feedbackActive.Store(false)
+			return true, err
+		}
 		if err != nil || !deferredSubmit && feedbackRequiresChange(action) && a.feedbackState() == before {
 			action = "unbound"
 		}
