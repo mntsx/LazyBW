@@ -171,9 +171,13 @@ var DefaultKeybinds = map[string]map[string][]string{
 	"reprompt_popup": {"confirm": {"enter"}, "cancel": {"escape"},
 		"reveal_password": {"ctrl+r"}},
 	"name_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
 		"confirm": {"enter"}, "cancel": {"escape"},
 	},
 	"folder_popup": {
+		"next": {"down"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
 		"confirm": {"enter"}, "cancel": {"escape"},
 	},
 }

@@ -150,12 +150,15 @@ func (a *App) aliasAvailable(section, action string) bool {
 	if section == "server_picker" {
 		return s.Mode == DialogServer
 	}
+	if section == "name_popup" {
+		return s.Mode == DialogName || s.Mode == DialogField
+	}
 	modalSection := map[string]Mode{
 		"create_item_popup": DialogCreate, "create_field_popup": DialogFieldType,
 		"linked_field_popup": DialogLinkedChoice, "card_brand_popup": DialogCardBrand,
 		"identity_title_popup": DialogIdentityTitle, "website_popup": DialogWebsite,
-		"reprompt_popup": DialogReprompt, "name_popup": DialogName,
-		"folder_popup": DialogFolder, "search": Find, "detail": Edit,
+		"reprompt_popup": DialogReprompt, "folder_popup": DialogFolder,
+		"search": Find, "detail": Edit,
 	}
 	if mode, ok := modalSection[section]; ok {
 		return s.Mode == mode

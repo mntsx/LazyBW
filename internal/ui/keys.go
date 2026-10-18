@@ -169,7 +169,8 @@ func (a *App) bindWordKeys(register func(interface{}, gocui.Modifier, func(*gocu
 // shared by Master password, API credentials, Find and the detail editor.
 func (a *App) wordEdit(direction int, remove bool) error {
 	s := a.S
-	if s.Popup != nil || s.Mode == DialogServer || s.Screen == AuthChecking {
+	if s.Popup != nil || s.Mode == DialogServer || s.Screen == AuthChecking ||
+		a.creationTextInputLocked() {
 		return nil
 	}
 	if s.Screen != Workspace || s.Mode == DialogReprompt {
@@ -232,8 +233,23 @@ func (a *App) editEvent(_ *gocui.View, key gocui.Key, ch rune, mod gocui.Modifie
 }
 func (a *App) inputMode() bool {
 	s := a.S
-	return s.Mode == DialogReprompt || s.Screen != Workspace && s.AuthFocus < 2 || s.Mode == Find || s.Mode == Edit || s.Mode == DialogName || s.Mode == DialogField || s.Mode == DialogFolder
+	return s.Mode == DialogReprompt || s.Screen != Workspace && s.AuthFocus < 2 || s.Mode == Find || s.Mode == Edit || isCreationNameMode(s.Mode)
 }
+
+func isCreationNameMode(mode Mode) bool {
+	return mode == DialogName || mode == DialogField || mode == DialogFolder
+}
+
+func (a *App) creationValidationPending() bool {
+	return isCreationNameMode(a.S.Mode) &&
+		(a.S.Busy || a.submitFlash == submitFlashDialog)
+}
+
+func (a *App) creationTextInputLocked() bool {
+	return isCreationNameMode(a.S.Mode) &&
+		(a.S.FormFocus != 0 || a.creationValidationPending())
+}
+
 func (a *App) char(r rune) error {
 	s := a.S
 	if s.Mode == DialogServer || s.Screen == AuthChecking || s.Screen == AuthOffline {
@@ -331,7 +347,7 @@ func (a *App) char(r rune) error {
 		return nil
 	}
 	if a.inputMode() {
-		if (s.Mode == DialogName || s.Mode == DialogFolder || s.Mode == DialogField) && s.FormFocus != 0 {
+		if a.creationTextInputLocked() {
 			return nil
 		}
 		s.Insert(r)
@@ -576,6 +592,9 @@ func (a *App) deleteForward() error {
 		return nil
 	}
 	if a.inputMode() {
+		if a.creationTextInputLocked() {
+			return nil
+		}
 		s.DeleteForward()
 		if s.Mode == Find {
 			s.Search = s.Input
@@ -611,6 +630,9 @@ func (a *App) backspace() error {
 		return nil
 	}
 	if a.inputMode() {
+		if a.creationTextInputLocked() {
+			return nil
+		}
 		a.S.Backspace()
 		if a.S.Mode == Find {
 			a.S.Search = a.S.Input
@@ -621,7 +643,7 @@ func (a *App) backspace() error {
 }
 func (a *App) arrow(vertical, horizontal int) error {
 	s := a.S
-	if s.Screen == AuthChecking {
+	if s.Screen == AuthChecking || a.creationValidationPending() {
 		return nil
 	}
 	if s.Screen == AuthOffline && s.Mode != DialogServer {
@@ -983,7 +1005,7 @@ func (a *App) enter() error {
 	if s.Busy {
 		return nil
 	}
-	if s.Mode == DialogName || s.Mode == DialogField || s.Mode == DialogFolder {
+	if isCreationNameMode(s.Mode) {
 		if s.FormFocus != 2 && strings.TrimSpace(s.Input) == "" {
 			s.FormError = creationNameError(s.Mode)
 			return nil
@@ -1514,7 +1536,10 @@ func (a *App) clickAt(x, y int) error {
 		}
 		return nil
 	}
-	if s.Mode == DialogName || s.Mode == DialogFolder || s.Mode == DialogField {
+	if isCreationNameMode(s.Mode) {
+		if a.creationValidationPending() {
+			return nil
+		}
 		w := min(65, a.width()-6)
 		x0 := (a.width() - w) / 2
 		cy := max(2, (a.height()-16)/2)
