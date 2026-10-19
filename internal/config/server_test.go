@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,6 @@ func TestDefaultServerConfiguration(t *testing.T) {
 		name, value, want string
 	}{
 		{"missing", `"client_env_path":"/tmp/creds"`, "us"},
-		{"null", `"client_env_path":"/tmp/creds", "default_server":null`, "us"},
-		{"invalid", `"client_env_path":"/tmp/creds", "default_server":"other"`, "us"},
-		{"number", `"client_env_path":"/tmp/creds", "default_server":4`, "us"},
 		{"eu", `"client_env_path":"/tmp/creds", "default_server":"eu"`, "eu"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -28,6 +26,15 @@ func TestDefaultServerConfiguration(t *testing.T) {
 				t.Fatalf("config: %#v, err: %v", cfg.Authentication, err)
 			}
 		})
+	}
+	for _, value := range []string{"null", `"other"`, "4"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "settings.jsonc"), []byte(`{"authentication":{"client_env_path":"/tmp/creds","default_server":`+value+`}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir); !errors.Is(err, errInvalidConfigValue) || !strings.Contains(err.Error(), "settings.jsonc: authentication.default_server") {
+			t.Fatalf("invalid default_server %s error: %v", value, err)
+		}
 	}
 	dir := t.TempDir()
 	if _, err := Load(dir); err != nil {

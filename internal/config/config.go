@@ -254,6 +254,11 @@ func NormalizeJSONC(src []byte) ([]byte, error) {
 	return out, nil
 }
 func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
+	unlock, err := acquireConfigLock(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -265,7 +270,7 @@ func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
 		}
 		b = annotateDefaults(filepath.Base(path), b)
 		b = append(b, '\n')
-		if err = os.WriteFile(path, b, 0600); err != nil {
+		if err = writeConfigAtomic(path, b, nil, true); err != nil {
 			return nil, err
 		}
 	}
@@ -280,6 +285,23 @@ func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
 	}
 	if obj == nil {
 		return nil, fmt.Errorf("%s must be a JSON object", filepath.Base(path))
+	}
+	if err = addMissingDefaults(path, b, normalized, defaults); err != nil {
+		return nil, fmt.Errorf("complete %s defaults: %w", filepath.Base(path), err)
+	}
+	// Decode the completed file so newly persisted defaults apply immediately,
+	// not only after the next process start.
+	completed, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	completed = bytes.TrimPrefix(completed, []byte{0xef, 0xbb, 0xbf})
+	normalized, err = NormalizeJSONC(completed)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	if err = json.Unmarshal(normalized, &obj); err != nil {
+		return nil, fmt.Errorf("invalid completed %s: %w", filepath.Base(path), err)
 	}
 	return obj, nil
 }
@@ -305,7 +327,7 @@ func DefaultDirectory() (string, error) {
 	return filepath.Join(home, ".config", "lazybw"), nil
 }
 
-// Load preserves existing files and merges defaults in memory. JSONC wins over JSON.
+// Load preserves configured values, persists missing defaults, and gives JSONC precedence.
 func Load(dir string) (Config, error) {
 	if dir == "" {
 		var err error
@@ -324,6 +346,12 @@ func Load(dir string) (Config, error) {
 	keys, err := readObject(preferred(dir, "keybinds"), DefaultKeybinds)
 	if err != nil {
 		return Config{}, err
+	}
+	if field := validateSettings(settings); field != "" {
+		return Config{}, fmt.Errorf("%w in settings.jsonc: %s", errInvalidConfigValue, field)
+	}
+	if field := validateKeybinds(keys); field != "" {
+		return Config{}, fmt.Errorf("%w in keybinds.jsonc: %s", errInvalidConfigValue, field)
 	}
 	c := Config{Directory: dir, Colors: map[string]string{}, Keybinds: map[string]map[string][]string{}}
 	c.Local.VaultEncryption = "aes-256-gcm"
@@ -381,6 +409,9 @@ func Load(dir string) (Config, error) {
 			}
 			for action, value := range overrides {
 				if section == "global" && action == "save_all" {
+					if _, canonical := overrides["push_all"]; canonical {
+						continue
+					}
 					action = "push_all"
 				}
 				bindings, err := decodeBindings(value)
@@ -415,9 +446,16 @@ func (c Config) Key(section, action string) string {
 
 // decodeBindings accepts the legacy string form and ordered binding arrays.
 func decodeBindings(raw json.RawMessage) ([]string, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, errors.New("expected a key or list of keys, got null")
+	}
 	var one string
 	if json.Unmarshal(raw, &one) == nil {
-		return []string{strings.ToLower(strings.TrimSpace(one))}, nil
+		one = strings.ToLower(strings.TrimSpace(one))
+		if one == "" {
+			return nil, errors.New("empty key binding")
+		}
+		return []string{one}, nil
 	}
 	var many []string
 	if err := json.Unmarshal(raw, &many); err != nil {

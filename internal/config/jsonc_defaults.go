@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -205,18 +206,20 @@ func legacyCompatibleDefaults(filename string, existing, defaults map[string]any
 		return
 	}
 	if _, exists := existing["edits"]; !exists {
-		if legacy, ok := existing["changes"].(map[string]any); ok {
-			merged, _ := defaults["edits"].(map[string]any)
-			for key, value := range legacy {
-				merged[key] = value
-			}
+		if _, legacy := existing["changes"].(map[string]any); legacy {
+			// Treat the old section as the canonical section while it remains in
+			// the file, so later user edits keep taking effect without duplicates.
+			defaults["changes"] = defaults["edits"]
+			delete(defaults, "edits")
 		}
 	}
 	global, _ := existing["global"].(map[string]any)
 	globalDefaults, _ := defaults["global"].(map[string]any)
-	if _, exists := global["push_all"]; !exists {
-		if legacy, ok := global["save_all"]; ok {
-			globalDefaults["push_all"] = legacy
+	if _, canonical := global["push_all"]; !canonical {
+		if _, legacy := global["save_all"]; legacy {
+			// save_all already supplies this action through the compatibility
+			// loader; do not persist a competing push_all value beside it.
+			delete(globalDefaults, "push_all")
 		}
 	}
 }
@@ -331,12 +334,22 @@ func applyInsertions(source []byte, insertions []jsonInsertion) []byte {
 	return result
 }
 
-func writeConfigAtomic(path string, content []byte) error {
+var errConfigChanged = errors.New("configuration changed while defaults were being added")
+
+func writeConfigAtomic(path string, content, expected []byte, requireMissing bool) error {
+	writePath := path
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		resolved, resolveErr := filepath.EvalSymlinks(path)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		writePath = resolved
+	}
 	mode := os.FileMode(0600)
-	if info, err := os.Stat(path); err == nil {
+	if info, err := os.Stat(writePath); err == nil {
 		mode = info.Mode().Perm()
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".lazybw-config-*")
+	file, err := os.CreateTemp(filepath.Dir(writePath), ".lazybw-config-*")
 	if err != nil {
 		return err
 	}
@@ -354,7 +367,38 @@ func writeConfigAtomic(path string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	if requireMissing {
+		// A hard link in the same directory publishes the fully synced temporary
+		// file atomically and fails rather than replacing a concurrently created file.
+		if err = os.Link(temporary, writePath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return errConfigChanged
+			}
+			return err
+		}
+	} else {
+		current, readErr := os.ReadFile(writePath)
+		if readErr != nil {
+			return readErr
+		}
+		current = bytes.TrimPrefix(current, []byte{0xef, 0xbb, 0xbf})
+		if !bytes.Equal(current, expected) {
+			return errConfigChanged
+		}
+		if err = os.Rename(temporary, writePath); err != nil {
+			return err
+		}
+	}
+	directory, err := os.Open(filepath.Dir(writePath))
+	if err != nil {
+		return err
+	}
+	syncErr := directory.Sync()
+	closeErr := directory.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 func addMissingDefaults(path string, source, normalized []byte, defaults any) error {
@@ -378,5 +422,5 @@ func addMissingDefaults(path string, source, normalized []byte, defaults any) er
 	if len(insertions) == 0 {
 		return nil
 	}
-	return writeConfigAtomic(path, applyInsertions(source, insertions))
+	return writeConfigAtomic(path, applyInsertions(source, insertions), source, false)
 }

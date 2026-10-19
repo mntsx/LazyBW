@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,7 @@ func TestLoadPersistsMissingSettingsDefaults(t *testing.T) {
 	original := `{
   // Keep this user comment.
   "authentication": {"default_server": "eu"},
+  "local_replication": {"save_vault": true},
   "colors": {"selection": "ansi_red"},
   "custom": {"keep": true}
 }
@@ -42,8 +44,9 @@ func TestLoadPersistsMissingSettingsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Authentication.DefaultServer != "eu" || cfg.Colors["selection"] != "ansi_red" {
-		t.Fatalf("existing settings were overwritten: %+v", cfg)
+	if cfg.Authentication.DefaultServer != "eu" || cfg.Colors["selection"] != "ansi_red" ||
+		!cfg.Local.SaveVault || cfg.Local.VaultPath != "$HOME/.local/share/lazybw/bw-vault" {
+		t.Fatalf("existing or first-load default settings are wrong: %+v", cfg)
 	}
 	content, object := readCompletedObject(t, path)
 	if !strings.Contains(content, "// Keep this user comment.") {
@@ -93,9 +96,10 @@ func TestLoadPersistsMissingKeybindDefaultsAndLegacyAliases(t *testing.T) {
 		t.Fatalf("missing keybind defaults were not persisted: %#v", object)
 	}
 	global := object["global"].(map[string]any)
-	edits := object["edits"].(map[string]any)
-	if global["push_all"].([]any)[0] != "ctrl+y" || edits["discard"].([]any)[0] != "x" {
-		t.Fatalf("legacy aliases were not migrated: global=%#v edits=%#v", global, edits)
+	changes := object["changes"].(map[string]any)
+	if global["save_all"].([]any)[0] != "ctrl+y" || global["push_all"] != nil ||
+		changes["discard"].([]any)[0] != "x" || changes["save"] == nil || object["edits"] != nil {
+		t.Fatalf("legacy aliases were not completed safely: global=%#v changes=%#v", global, changes)
 	}
 	firstContent := content
 	second, err := Load(directory)
@@ -108,5 +112,63 @@ func TestLoadPersistsMissingKeybindDefaultsAndLegacyAliases(t *testing.T) {
 	}
 	if secondContent != firstContent {
 		t.Fatal("default completion is not idempotent")
+	}
+	updated := strings.ReplaceAll(secondContent, "ctrl+y", "ctrl+z")
+	updated = strings.Replace(updated, `"discard": ["x", "d"]`, `"discard": ["z", "d"]`, 1)
+	if err = os.WriteFile(path, []byte(updated), 0600); err != nil {
+		t.Fatal(err)
+	}
+	third, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Key("global", "push_all") != "ctrl+z" || third.Key("edits", "discard") != "z" {
+		t.Fatal("later edits to legacy shortcuts stopped taking effect")
+	}
+}
+
+func TestAtomicCompletionRefusesConcurrentChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.jsonc")
+	original := []byte(`{"authentication":{}}`)
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := writeConfigAtomic(path, []byte(`{"replacement":true}`), []byte(`{"stale":true}`), false)
+	if !errors.Is(err, errConfigChanged) {
+		t.Fatalf("concurrent change error = %v", err)
+	}
+	current, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(current) != string(original) {
+		t.Fatal("stale completion overwrote the current configuration")
+	}
+}
+
+func TestDefaultCompletionPreservesConfigurationSymlinks(t *testing.T) {
+	directory := t.TempDir()
+	targetDirectory := t.TempDir()
+	target := filepath.Join(targetDirectory, "settings.jsonc")
+	if err := os.WriteFile(target, []byte("{\n  // managed target\n  \"authentication\": {}\n}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "settings.jsonc")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Load(directory); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("configuration symlink was replaced: mode=%v", info.Mode())
+	}
+	content, object := readCompletedObject(t, target)
+	if !strings.Contains(content, "// managed target") || object["local_replication"] == nil {
+		t.Fatal("symlink target was not completed while preserving comments")
 	}
 }
