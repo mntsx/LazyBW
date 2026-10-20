@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type regionCall struct {
@@ -139,6 +140,51 @@ func TestIsolatedRegionsAndSessions(t *testing.T) {
 	client.Close(ctx)
 	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Fatalf("session directory was not removed: %v", err)
+	}
+}
+
+func TestSessionStartupCleansOnlyInactiveOldDirectories(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	base := filepath.Join(dir, "bitwarden", "sessions")
+	if err := os.MkdirAll(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(base, "old")
+	fresh := filepath.Join(base, "fresh")
+	active := filepath.Join(base, "active")
+	for _, path := range []string{old, fresh, active} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	activeLock, err := lockSession(active, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseSessionLock(activeLock)
+	oldTime := time.Now().Add(-abandonedSessionAge - time.Hour)
+	for _, path := range []string{old, active} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	client, err := NewClient(&regionRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(ctx)
+	if err := client.ConfigureRegion(ctx, dir, "us"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("inactive old session was not removed: %v", err)
+	}
+	for _, path := range []string{fresh, active} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("session %q was removed: %v", path, err)
+		}
 	}
 }
 

@@ -126,6 +126,7 @@ type Client struct {
 	repromptReady bool
 	profileDir    string
 	sessionDir    string
+	sessionLock   *os.File
 	Cipher        *vault.Cipher
 }
 
@@ -283,6 +284,7 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 	if err := os.Chmod(base, 0700); err != nil {
 		return "", fmt.Errorf("cannot secure Bitwarden sessions directory: %w", err)
 	}
+	cleanupAbandonedSessions(base, time.Now())
 
 	for attempts := 0; attempts < 10; attempts++ {
 		var random [8]byte
@@ -297,8 +299,14 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 			}
 			return "", fmt.Errorf("cannot create Bitwarden session: %w", err)
 		}
+		lock, err := lockSession(sessionDir, false)
+		if err != nil {
+			_ = os.RemoveAll(sessionDir)
+			return "", fmt.Errorf("cannot lock Bitwarden session: %w", err)
+		}
 		profile := filepath.Join(sessionDir, region)
 		if err := os.Mkdir(profile, 0700); err != nil {
+			releaseSessionLock(lock)
 			_ = os.RemoveAll(sessionDir)
 			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
 		}
@@ -306,11 +314,13 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 		c.mu.Lock()
 		if c.sessionDir == "" {
 			c.sessionDir = sessionDir
+			c.sessionLock = lock
 			c.mu.Unlock()
 			return profile, nil
 		}
 		activeSession := c.sessionDir
 		c.mu.Unlock()
+		releaseSessionLock(lock)
 		_ = os.RemoveAll(sessionDir)
 		profile = filepath.Join(activeSession, region)
 		if err := os.MkdirAll(profile, 0700); err != nil {
@@ -477,10 +487,13 @@ func (c *Client) Close(ctx context.Context) {
 	sessionDir := c.sessionDir
 	c.sessionDir = ""
 	c.profileDir = ""
+	sessionLock := c.sessionLock
+	c.sessionLock = nil
 	c.mu.Unlock()
 	if sessionDir != "" {
 		_ = os.RemoveAll(sessionDir)
 	}
+	releaseSessionLock(sessionLock)
 	c.Cipher.Close()
 }
 
