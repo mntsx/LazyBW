@@ -95,6 +95,9 @@ func validateSettings(settings map[string]json.RawMessage) string {
 	if !ok || (server != "us" && server != "eu") {
 		return "authentication.default_server"
 	}
+	if _, err := decodeBackendModes(authentication["backend_mode"]); err != nil {
+		return "authentication.backend_mode"
+	}
 	local, ok := objectField(settings, "local_replication")
 	if !ok {
 		return "local_replication"

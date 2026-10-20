@@ -97,7 +97,7 @@ func (a *App) bindAliases(g *gocui.Gui) error {
 		"enter": true, "escape": true, "esc": true, "backspace": true,
 		"delete": true, "home": true, "end": true, "tab": true,
 		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
-		"ctrl+r": true, "ctrl+j": true, "ctrl+enter": true, "ctrl+w": true,
+		"ctrl+r": true, "ctrl+b": true, "ctrl+j": true, "ctrl+enter": true, "ctrl+w": true,
 	}
 	for name := range a.configuredBindings() {
 		if native[name] {
@@ -155,6 +155,9 @@ func (a *App) aliasAvailable(section, action string) bool {
 	}
 	if section == "server_picker" {
 		return s.Mode == DialogServer
+	}
+	if section == "backend_picker" {
+		return s.Mode == DialogBackend
 	}
 	if section == "name_popup" {
 		return s.Mode == DialogName || s.Mode == DialogField
@@ -270,6 +273,8 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { a.requestQuit(); return nil }
 	case "server":
 		return func() error { a.openServerPicker(); return nil }
+	case "backend":
+		return func() error { a.openBackendPicker(); return nil }
 	case "sync":
 		return func() error { a.checkRemote(); return nil }
 	case "push_all":
@@ -388,6 +393,8 @@ func parseKey(s string) (interface{}, bool) {
 		return gocui.KeyCtrlD, true
 	case "ctrl+r":
 		return gocui.KeyCtrlR, true
+	case "ctrl+b":
+		return gocui.KeyCtrlB, true
 	case "ctrl+j", "ctrl+enter":
 		return gocui.KeyCtrlJ, true
 	}
@@ -451,6 +458,8 @@ func aliasActionName(section, action string) string {
 		return "cancel"
 	case "server":
 		return "server"
+	case "backend":
+		return "backend"
 	case "hint_next_page", "next_page":
 		return "next page"
 	case "newline":

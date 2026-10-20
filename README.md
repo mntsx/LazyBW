@@ -62,12 +62,14 @@ On first launch, LazyBW creates `settings.jsonc` and `keybinds.jsonc` in `~/.con
 ```jsonc
 "authentication": {
   "client_env_path": "$HOME/.config/lazybw/credentials.env",
-  "default_server": "eu"
+  "default_server": "eu",
+  "backend_mode": ["bw", "bw serve"]
 }
 ```
 
 - `client_env_path`: path to a credentials file, or `null` to enter credentials manually. `$HOME` and `~/` are supported.
 - `default_server`: `"us"` (default) or `"eu"`.
+- `backend_mode`: `"bw"`, `"bw serve"`, or an ordered list of both. The default tries `bw` before `bw serve`; `bw serve` requires Bitwarden CLI 2025.9.0 or later and uses a private Unix socket.
 
 The credentials file accepts ordinary `.env` assignments, with or without `export`:
 

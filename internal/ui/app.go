@@ -25,6 +25,7 @@ type App struct {
 	busyFlag, backupActive, noticeActive      atomic.Bool
 	authReconnectActive                       atomic.Bool
 	feedbackActive, exitRequested             atomic.Bool
+	serveRecoveryActive                       atomic.Bool
 	jobsPending                               atomic.Int32
 	quitDiscardConfirmed                      atomic.Bool
 	networkChecking                           atomic.Bool
@@ -114,6 +115,7 @@ func (a *App) Run() error {
 	go a.backupWorker(ctx)
 	go a.checkOfflineStartup(ctx)
 	go a.monitorConnection(ctx)
+	go a.monitorServe(ctx)
 	go func() {
 		tick := time.NewTicker(110 * time.Millisecond)
 		ticks := 0
@@ -179,6 +181,24 @@ func (a *App) startupWithUpdates(
 		s.Notice = ""
 		return nil
 	})
+	if !s.BackendSelected {
+		if len(s.Config.Authentication.BackendMode) > 0 {
+			mode, err := s.CLI.SelectAvailableBackend(ctx, s.Config.Authentication.BackendMode)
+			if err != nil {
+				update(func(*gocui.Gui) error {
+					s.Screen = AuthClient
+					s.Busy = false
+					s.Notice = "No configured Bitwarden backend is available"
+					return nil
+				})
+				return
+			}
+			s.Backend = mode
+		} else {
+			s.Backend = s.CLI.BackendMode()
+		}
+		s.BackendSelected = true
+	}
 	if err := s.CLI.ConfigureRegion(ctx, s.Config.Directory, s.Server); err != nil {
 		update(func(*gocui.Gui) error {
 			s.Screen = AuthClient
@@ -340,6 +360,10 @@ func (a *App) layout(g *gocui.Gui) error {
 	if a.S.Mode == DialogServer &&
 		(a.S.Screen == AuthClient || a.S.Screen == AuthMaster || a.S.Screen == AuthOffline) {
 		a.serverPickerRender(c)
+	}
+	if a.S.Mode == DialogBackend &&
+		(a.S.Screen == AuthClient || a.S.Screen == AuthMaster || a.S.Screen == AuthOffline) {
+		a.backendPickerRender(c)
 	}
 	if a.S.Popup == nil && a.S.Screen == Workspace && a.S.Mode >= DialogCreate && a.S.Mode <= DialogReprompt {
 		a.createRender(c)
@@ -524,6 +548,33 @@ func (a *App) serverPickerRender(c *Canvas) {
 		a.configuredHint("server_picker", "cancel", "cancel")))
 }
 
+// backendPickerRender mirrors the server selector while exposing only the two
+// supported Bitwarden transports. Unavailable choices are intentionally inert.
+func (a *App) backendPickerRender(c *Canvas) {
+	x, y, w, h := serverPickerGeometry(c.W, c.H)
+	c.Fill(x, y, w, h, ' ', CWhite, CDefault)
+	drawDialogBorder(c, x, y, w, h)
+	c.Text(x+2, y+1, "Select backend mode", CBBlue, CDefault)
+	for i, label := range []string{"bw", "bw serve"} {
+		row := y + 3 + i
+		bg := CDefault
+		if i == a.S.BackendChoice {
+			bg = CBlack
+		}
+		fg, icon := CWhite, CBlue
+		if !a.S.BackendReady[i] {
+			fg, icon = CBBlack, CRed
+		}
+		c.Fill(x+3, row, w-6, 1, ' ', fg, bg)
+		c.Text(x+4, row, "\U0000F013", icon, bg)
+		c.Text(x+6, row, label, fg, bg)
+	}
+	authHints(c, y+h-2, joinConfiguredHints(
+		a.configuredMoveHint("backend_picker", false),
+		a.configuredHint("backend_picker", "confirm", "select"),
+		a.configuredHint("backend_picker", "cancel", "cancel")))
+}
+
 func (a *App) startupRender(c *Canvas) {
 	a.loadingPanel(c, a.S.BusyMessage)
 	drawMainBorders(c, nil, nil, -1)
@@ -600,6 +651,8 @@ func (a *App) authRender(c *Canvas) {
 		}
 	} else {
 		c.Text(4, 1, label, CWhite, CDefault)
+		c.Text(2, 2, "\U0000F013", CBlue, CDefault)
+		c.Text(4, 2, string(s.Backend), CWhite, CDefault)
 	}
 	if rightX > 4+len("Local")+2 && (s.LocalMode || rightX > 4+len(label)+2) {
 		if s.LocalMode {
@@ -663,7 +716,8 @@ func (a *App) authRender(c *Canvas) {
 		a.configuredMoveHint(section, s.AuthFocus >= 2),
 		a.configuredHint(section, "submit", "select"),
 		a.configuredHint(section, revealAction, "reveal"),
-		a.configuredHint(section, "server", "server"))
+		a.configuredHint(section, "server", "server"),
+		a.configuredHint(section, "backend", "backend"))
 
 	if !a.textEntryActive() && !s.KeyFeedbackExpires.IsZero() &&
 		time.Now().Before(s.KeyFeedbackExpires) {
@@ -886,13 +940,18 @@ func (a *App) popupRender(c *Canvas) {
 	c.Text(x+2, y+1, p.Title, CBBlue, CDefault)
 	c.Text(x+2, y+3, minWidth(p.Question, w-4), CWhite, CDefault)
 	if p.Acknowledge {
+		label := p.AcknowledgeText
+		if label == "" {
+			label = "OK"
+		}
+		width := symmetricButtonWidth(label, 10)
 		by := y + height - 4
-		bx := x + (w-10)/2
+		bx := x + (w-width)/2
 		mx, my := -1, -1
 		if a.gui != nil {
 			mx, my = a.gui.MousePosition()
 		}
-		a.button(c, bx, by, 10, "OK", CBlue, true, my >= by && my <= by+1 && mx >= bx && mx < bx+10)
+		a.button(c, bx, by, width, label, CBlue, true, my >= by && my <= by+1 && mx >= bx && mx < bx+width)
 		return
 	}
 	if p.Blocking {
@@ -1163,7 +1222,7 @@ func (a *App) modalOpen() bool {
 	if a.S.Popup != nil {
 		return true
 	}
-	return a.S.Mode == DialogServer ||
+	return a.S.Mode == DialogServer || a.S.Mode == DialogBackend ||
 		(a.S.Screen == Workspace && a.S.Mode >= DialogCreate && a.S.Mode <= DialogReprompt)
 }
 

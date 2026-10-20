@@ -36,6 +36,7 @@ const (
 	DialogFolder
 	DialogWebsite
 	DialogServer
+	DialogBackend
 	DialogLinkedChoice
 	DialogFoldersChoice
 	DialogCardBrand
@@ -64,6 +65,8 @@ type Popup struct {
 	Quit                   bool
 	RemoteReview           *bitwarden.RemoteReview
 	Acknowledge            bool
+	AcknowledgeText        string
+	AcknowledgeAction      func()
 	RemoteChoice           int // 0 soft sync, 1 hard sync, 2 abort sync
 	RemoteFromRegistration bool
 	Yes                    bool
@@ -76,12 +79,19 @@ type State struct {
 	ServerChoice                       int
 	ServerReady                        [2]bool
 	ServerMoved                        bool
+	Backend                            bitwarden.BackendMode
+	BackendChoice                      int
+	BackendReady                       [2]bool
+	BackendMoved                       bool
+	BackendSelected                    bool
 	LocalMode                          bool
 	LocalOrigin                        string
 	LocalAlgorithm                     string
 	LocalReplicaCreated                string
 	LocalWarning                       string
 	ServerConnected                    bool
+	BackendRecovering                  bool
+	BackendFatal                       bool
 	LocalSession                       *localvault.Session
 	BackupBusy                         bool
 	CLI                                *bitwarden.Client
@@ -161,7 +171,11 @@ func (s *State) ClearWorkspaceNotice() {
 }
 
 func NewState(cfg config.Config, cli *bitwarden.Client) *State {
-	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, 0, 0}}
+	backend := bitwarden.BackendBW
+	if len(cfg.Authentication.BackendMode) > 0 {
+		backend = bitwarden.BackendMode(cfg.Authentication.BackendMode[0])
+	}
+	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), Backend: backend, CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, 0, 0}}
 }
 
 // ProtectMaster encrypts the editing buffer between keystrokes in the live UI.

@@ -13,8 +13,9 @@ import (
 )
 
 type Authentication struct {
-	ClientEnvPath string `json:"client_env_path"`
-	DefaultServer string `json:"default_server"`
+	ClientEnvPath string   `json:"client_env_path"`
+	DefaultServer string   `json:"default_server"`
+	BackendMode   []string `json:"backend_mode"`
 }
 type Local struct {
 	SaveVault       bool   `json:"save_vault"`
@@ -76,19 +77,23 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"next": {"down"}, "previous": {"up"},
 		"button_left": {"left"}, "button_right": {"right"},
 		"submit": {"enter"}, "reveal_secret": {"ctrl+r"},
-		"server": {"ctrl+s"}, "quit": {"ctrl+q"},
+		"server": {"ctrl+s"}, "backend": {"ctrl+b"}, "quit": {"ctrl+q"},
 	},
 	"master_password": {
 		"next": {"down"}, "previous": {"up"},
 		"button_left": {"left"}, "button_right": {"right"},
 		"submit": {"enter"}, "reveal_password": {"ctrl+r"},
-		"server": {"ctrl+s"}, "quit": {"ctrl+q"},
+		"server": {"ctrl+s"}, "backend": {"ctrl+b"}, "quit": {"ctrl+q"},
 	},
 	"authentication_offline": {
 		"button_left": {"left"}, "button_right": {"right"},
-		"submit": {"enter"}, "server": {"ctrl+s"}, "quit": {"ctrl+q"},
+		"submit": {"enter"}, "server": {"ctrl+s"}, "backend": {"ctrl+b"}, "quit": {"ctrl+q"},
 	},
 	"server_picker": {
+		"next": {"down"}, "previous": {"up"},
+		"confirm": {"right", "enter"}, "cancel": {"escape"},
+	},
+	"backend_picker": {
 		"next": {"down"}, "previous": {"up"},
 		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
@@ -357,7 +362,7 @@ func Load(dir string) (Config, error) {
 	if err := createGitignore(dir); err != nil {
 		return Config{}, err
 	}
-	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us"}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
+	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw", "bw serve"}}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
 	if err != nil {
 		return Config{}, err
 	}
@@ -383,7 +388,15 @@ func Load(dir string) (Config, error) {
 		if json.Unmarshal(raw, &fields) == nil {
 			_ = json.Unmarshal(fields["client_env_path"], &c.Authentication.ClientEnvPath)
 			_ = json.Unmarshal(fields["default_server"], &c.Authentication.DefaultServer)
+			modes, modeErr := decodeBackendModes(fields["backend_mode"])
+			if modeErr != nil {
+				return Config{}, fmt.Errorf("%w in settings.jsonc: authentication.backend_mode", errInvalidConfigValue)
+			}
+			c.Authentication.BackendMode = modes
 		}
+	}
+	if len(c.Authentication.BackendMode) == 0 {
+		c.Authentication.BackendMode = []string{"bw", "bw serve"}
 	}
 	if raw := settings["local_replication"]; len(raw) > 0 {
 		var fields map[string]json.RawMessage
@@ -490,6 +503,7 @@ func decodeBindings(raw json.RawMessage) ([]string, error) {
 
 var defaultEnum = map[string]string{
 	"default_server":   "us, eu",
+	"backend_mode":     "bw, bw serve",
 	"vault_encryption": "aes-256-gcm, aes-256-gcm-siv, xchacha20-poly1305",
 }
 var defaultLine = regexp.MustCompile(`^(\s*)"([^"]+)":`)
@@ -516,6 +530,39 @@ func annotateDefaults(filename string, jsonData []byte) []byte {
 		out.WriteString(line + "\n")
 	}
 	return []byte(strings.TrimSuffix(out.String(), "\n"))
+}
+
+// BackendModes accepts the canonical ordered backend selection values.
+func BackendModes(value []string) ([]string, error) {
+	if len(value) == 0 {
+		return nil, errors.New("backend mode list is empty")
+	}
+	modes := make([]string, 0, len(value))
+	seen := make(map[string]bool, len(value))
+	for _, value := range value {
+		mode := strings.ToLower(strings.TrimSpace(value))
+		if mode != "bw" && mode != "bw serve" || seen[mode] {
+			return nil, errors.New("invalid backend mode")
+		}
+		seen[mode] = true
+		modes = append(modes, mode)
+	}
+	return modes, nil
+}
+
+func decodeBackendModes(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return []string{"bw", "bw serve"}, nil
+	}
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return BackendModes([]string{one})
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return nil, err
+	}
+	return BackendModes(many)
 }
 
 // NormalizeServer accepts the supported Bitwarden cloud regions.

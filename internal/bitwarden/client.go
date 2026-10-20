@@ -121,7 +121,9 @@ func overriddenEnvironment(inherited, overrides []string) []string {
 type Client struct {
 	runner        Runner
 	mu            sync.Mutex
-	session       string
+	sessionSealed *vault.Sealed
+	mode          BackendMode
+	serve         *BWServeBackend
 	repromptTag   [32]byte
 	repromptReady bool
 	profileDir    string
@@ -138,12 +140,38 @@ func NewClient(r Runner) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{runner: r, Cipher: c}, nil
+	return &Client{runner: r, Cipher: c, mode: BackendBW, serve: &BWServeBackend{}}, nil
 }
 func (c *Client) call(ctx context.Context, op string, args []string, input []byte, vars []string, session bool) ([]byte, error) {
 	c.mu.Lock()
+	mode := c.mode
 	profile := c.profileDir
-	key := c.session
+	serve := c.serve
+	c.mu.Unlock()
+	key := c.sessionValue()
+	if mode == BackendBWServe {
+		ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
+		defer cancel()
+		if profile == "" {
+			return nil, &CLIError{op, "profile unavailable", 0}
+		}
+		if err := serve.Start(ctx, profile, key); err != nil {
+			return nil, err
+		}
+		var payload any
+		if len(input) > 0 {
+			if err := json.Unmarshal(input, &payload); err != nil {
+				return nil, &CLIError{op, "serialization", 0}
+			}
+		}
+		return serve.call(ctx, args, payload)
+	}
+	return c.callCLI(ctx, op, args, input, vars, session, key)
+}
+
+func (c *Client) callCLI(ctx context.Context, op string, args []string, input []byte, vars []string, session bool, key string) ([]byte, error) {
+	c.mu.Lock()
+	profile := c.profileDir
 	c.mu.Unlock()
 	if profile != "" {
 		vars = append(vars, "BITWARDENCLI_APPDATA_DIR="+profile)
@@ -193,6 +221,12 @@ func (c *Client) raw(ctx context.Context, args ...string) ([]byte, error) {
 func (c *Client) ses(ctx context.Context, args ...string) ([]byte, error) {
 	return c.call(ctx, "bw "+strings.Join(args, " "), args, nil, nil, true)
 }
+func (c *Client) rawCLI(ctx context.Context, args ...string) ([]byte, error) {
+	return c.callCLI(ctx, "bw "+strings.Join(args, " "), args, nil, nil, false, "")
+}
+func (c *Client) sesCLI(ctx context.Context, args ...string) ([]byte, error) {
+	return c.callCLI(ctx, "bw "+strings.Join(args, " "), args, nil, nil, true, c.sessionValue())
+}
 func decodeObject(b []byte, operation string) (map[string]any, error) {
 	var v map[string]any
 	if err := json.Unmarshal(b, &v); err != nil || v == nil {
@@ -220,17 +254,24 @@ func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) 
 	default:
 		return errors.New("unsupported Bitwarden region")
 	}
+	if c.BackendMode() == BackendBWServe && c.serve != nil {
+		_ = c.serve.Stop(ctx)
+	}
 	profile, err := c.sessionProfile(configDir, region)
 	if err != nil {
 		return err
 	}
 	c.mu.Lock()
 	c.profileDir = profile
-	c.session = ""
+	c.clearSessionLocked()
 	c.repromptReady = false
 	c.repromptTag = [32]byte{}
 	c.mu.Unlock()
-	status, err := c.Status(ctx)
+	b, err := c.rawCLI(ctx, "status")
+	if err != nil {
+		return err
+	}
+	status, err := decodeObject(b, "bw status")
 	if err != nil {
 		return err
 	}
@@ -250,11 +291,11 @@ func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) 
 	// Never change the endpoint of a logged-in profile without first
 	// logging out; this is confined to LazyBW's isolated directory.
 	if status["status"] != "unauthenticated" {
-		if _, err := c.raw(ctx, "logout"); err != nil {
+		if _, err := c.rawCLI(ctx, "logout"); err != nil {
 			return err
 		}
 	}
-	_, err = c.raw(ctx, "config", "server", url)
+	_, err = c.rawCLI(ctx, "config", "server", url)
 	return err
 }
 
@@ -331,14 +372,191 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 	return "", errors.New("cannot allocate unique Bitwarden session ID")
 }
 
+// ServeRunning reports only the process owned by this client.
+func (c *Client) ServeRunning() bool {
+	c.mu.Lock()
+	serve := c.serve
+	mode := c.mode
+	c.mu.Unlock()
+	return mode == BackendBWServe && serve != nil && serve.running()
+}
+
+// RecoverServe starts a replacement private process with the protected session
+// token and confirms it can read an authenticated vault endpoint. It never
+// performs lock, logout, or an uncertain write.
+func (c *Client) RecoverServe(ctx context.Context) error {
+	c.mu.Lock()
+	mode, profile, serve := c.mode, c.profileDir, c.serve
+	c.mu.Unlock()
+	if mode != BackendBWServe || serve == nil || profile == "" {
+		return errors.New("bw serve recovery is unavailable")
+	}
+	key := c.sessionValue()
+	if key == "" {
+		return &CLIError{"bw serve recovery", "authentication", 0}
+	}
+	if err := serve.Start(ctx, profile, key); err != nil {
+		return err
+	}
+	if _, err := serve.call(ctx, []string{"list", "folders"}, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) BackendMode() BackendMode {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mode
+}
+
+// SelectBackend changes only this LazyBW session. It deliberately clears the
+// unlock token: an unlocked session must never be carried between transports.
+func (c *Client) SelectBackend(ctx context.Context, mode BackendMode) error {
+	if mode != BackendBW && mode != BackendBWServe {
+		return errors.New("unsupported Bitwarden backend")
+	}
+	if mode == BackendBWServe {
+		if err := c.BackendAvailable(ctx, mode); err != nil {
+			return err
+		}
+	}
+	previous := c.BackendMode()
+	if previous == mode {
+		return nil
+	}
+	if c.HasSession() {
+		if previous == BackendBW {
+			_, _ = c.sesCLI(ctx, "lock")
+		} else if c.serve != nil && c.ServeRunning() {
+			_, _ = c.serve.call(ctx, []string{"lock"}, nil)
+		}
+	}
+	c.mu.Lock()
+	previous = c.mode
+	serve := c.serve
+	c.mode = mode
+	c.clearSessionLocked()
+	c.repromptReady = false
+	c.repromptTag = [32]byte{}
+	c.mu.Unlock()
+	if previous == BackendBWServe && serve != nil {
+		return serve.Stop(ctx)
+	}
+	return nil
+}
+
+// SelectAvailableBackend applies ordered configuration fallback only before
+// authentication. Later callers retain their explicit selected backend.
+func (c *Client) SelectAvailableBackend(ctx context.Context, modes []string) (BackendMode, error) {
+	for _, value := range modes {
+		mode := BackendMode(value)
+		if err := c.BackendAvailable(ctx, mode); err == nil {
+			if err := c.SelectBackend(ctx, mode); err != nil {
+				return "", err
+			}
+			return mode, nil
+		}
+	}
+	return "", errors.New("no configured Bitwarden backend is available")
+}
+
+// BackendAvailable performs no serve start. The normal CLI remains compatible
+// with every version; bw serve additionally requires 2025.9.0 and Unix help.
+func (c *Client) BackendAvailable(ctx context.Context, mode BackendMode) error {
+	if mode != BackendBW && mode != BackendBWServe {
+		return errors.New("unsupported Bitwarden backend")
+	}
+	version, err := c.callCLI(ctx, "bw --version", []string{"--version"}, nil, nil, false, "")
+	if err != nil {
+		return err
+	}
+	if mode == BackendBW {
+		return nil
+	}
+	if !serveVersionSupported(string(version)) {
+		return errors.New("bw serve requires Bitwarden CLI 2025.9.0 or later")
+	}
+	help, err := c.callCLI(ctx, "bw serve --help", []string{"serve", "--help"}, nil, nil, false, "")
+	// Recent bw releases support unix:// through --hostname but do not mention
+	// that transport in their generated help text. The version gate above is
+	// the compatibility guarantee; help only confirms the required option.
+	if err != nil || !strings.Contains(strings.ToLower(string(help)), "--hostname") {
+		return errors.New("bw serve does not support Unix sockets")
+	}
+	dir, err := secureServeDirectory()
+	if err != nil {
+		return err
+	}
+	return os.Remove(dir)
+}
+
+func (c *Client) clearSessionLocked() {
+	if c.sessionSealed != nil {
+		for i := range c.sessionSealed.Data {
+			c.sessionSealed.Data[i] = 0
+		}
+		for i := range c.sessionSealed.Nonce {
+			c.sessionSealed.Nonce[i] = 0
+		}
+		c.sessionSealed = nil
+	}
+}
+
+func (c *Client) setSession(value string) error {
+	if value == "" {
+		c.mu.Lock()
+		c.clearSessionLocked()
+		c.mu.Unlock()
+		return nil
+	}
+	sealed, err := c.Cipher.Seal(value)
+	if err != nil {
+		return err
+	}
+	secret, ok := sealed.(*vault.Sealed)
+	if !ok {
+		return errors.New("session encryption unavailable")
+	}
+	c.mu.Lock()
+	c.clearSessionLocked()
+	c.sessionSealed = secret
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) sessionValue() string {
+	c.mu.Lock()
+	sealed := c.sessionSealed
+	c.mu.Unlock()
+	if sealed == nil {
+		return ""
+	}
+	value, err := c.Cipher.Open(sealed)
+	if err != nil {
+		return ""
+	}
+	return value
+}
+
 func (c *Client) Version(ctx context.Context) string {
-	b, err := c.raw(ctx, "--version")
+	b, err := c.rawCLI(ctx, "--version")
 	if err != nil {
 		return "unavailable"
 	}
 	return strings.Split(string(b), "\n")[0]
 }
 func (c *Client) Status(ctx context.Context) (map[string]any, error) {
+	// bw serve exits before it can expose /status for an unauthenticated
+	// profile. Authentication state is not a vault operation, so inspect the
+	// isolated profile with bw until unlock has established this session.
+	if c.BackendMode() == BackendBWServe && !c.HasSession() {
+		b, err := c.rawCLI(ctx, "status")
+		if err != nil {
+			return nil, err
+		}
+		return decodeObject(b, "bw status")
+	}
 	b, err := c.raw(ctx, "status")
 	if err != nil {
 		return nil, err
@@ -346,7 +564,16 @@ func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 	return decodeObject(b, "bw status")
 }
 func (c *Client) Login(ctx context.Context, id, secret string) error {
-	status, err := c.Status(ctx)
+	// bw serve has no login route. Stop the private process before modifying its
+	// profile, then start a fresh process for subsequent HTTP vault operations.
+	if c.BackendMode() == BackendBWServe {
+		_ = c.serve.Stop(ctx)
+	}
+	b, err := c.rawCLI(ctx, "status")
+	if err != nil {
+		return err
+	}
+	status, err := decodeObject(b, "bw status")
 	if err != nil {
 		return err
 	}
@@ -354,11 +581,11 @@ func (c *Client) Login(ctx context.Context, id, secret string) error {
 		if strings.TrimPrefix(id, "user.") == fmt.Sprint(status["userId"]) {
 			return nil
 		}
-		if _, err = c.raw(ctx, "logout"); err != nil {
+		if _, err = c.rawCLI(ctx, "logout"); err != nil {
 			return err
 		}
 	}
-	_, err = c.call(ctx, "bw login --apikey", []string{"login", "--apikey"}, nil, []string{"BW_CLIENTID=" + id, "BW_CLIENTSECRET=" + secret}, false)
+	_, err = c.callCLI(ctx, "bw login --apikey", []string{"login", "--apikey"}, nil, []string{"BW_CLIENTID=" + id, "BW_CLIENTSECRET=" + secret}, false, "")
 	return err
 }
 
@@ -407,16 +634,53 @@ func AuthenticationMessage(err error, master bool) string {
 }
 
 func (c *Client) Unlock(ctx context.Context, password string) error {
-	b, err := c.call(ctx, "bw unlock", []string{"unlock", "--raw", "--passwordenv", "LAZYBW_MASTER_PASSWORD"}, nil, []string{"LAZYBW_MASTER_PASSWORD=" + password}, false)
+	if c.BackendMode() == BackendBWServe {
+		c.mu.Lock()
+		profile, serve := c.profileDir, c.serve
+		c.mu.Unlock()
+		if profile == "" {
+			return &CLIError{"bw unlock", "profile unavailable", 0}
+		}
+		ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
+		defer cancel()
+		if err := serve.Start(ctx, profile, ""); err != nil {
+			return err
+		}
+		b, err := serve.request(ctx, "POST", "/unlock", map[string]string{"password": password})
+		if err != nil {
+			return err
+		}
+		defer func() {
+			for i := range b {
+				b[i] = 0
+			}
+		}()
+		var message struct {
+			Raw string `json:"raw"`
+		}
+		if json.Unmarshal(b, &message) != nil || message.Raw == "" {
+			return &CLIError{"bw unlock", "invalid JSON response", 0}
+		}
+		if err := c.setSession(message.Raw); err != nil {
+			return err
+		}
+		return c.SetRepromptMaster(password)
+	}
+	b, err := c.callCLI(ctx, "bw unlock", []string{"unlock", "--raw", "--passwordenv", "LAZYBW_MASTER_PASSWORD"}, nil, []string{"LAZYBW_MASTER_PASSWORD=" + password}, false, "")
 	if err != nil {
 		return err
 	}
 	if len(b) == 0 {
 		return &CLIError{"bw unlock", "empty response", 0}
 	}
-	c.mu.Lock()
-	c.session = string(b)
-	c.mu.Unlock()
+	defer func() {
+		for i := range b {
+			b[i] = 0
+		}
+	}()
+	if err := c.setSession(string(b)); err != nil {
+		return err
+	}
 	return c.SetRepromptMaster(password)
 }
 
@@ -472,16 +736,25 @@ func (c *Client) VerifyReprompt(candidate string) bool {
 	return equal
 }
 
-func (c *Client) SetSession(s string) { c.mu.Lock(); c.session = s; c.mu.Unlock() }
-func (c *Client) HasSession() bool    { c.mu.Lock(); defer c.mu.Unlock(); return c.session != "" }
+func (c *Client) SetSession(s string) { _ = c.setSession(s) }
+func (c *Client) HasSession() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionSealed != nil
+}
 func (c *Client) Close(ctx context.Context) {
 	// An unauthenticated or locked CLI has no active BW_SESSION to revoke.
 	// Spawning `bw lock` in that case only delays application shutdown.
 	if c.HasSession() {
-		_, _ = c.ses(ctx, "lock")
+		if c.BackendMode() != BackendBWServe || c.ServeRunning() {
+			_, _ = c.ses(ctx, "lock")
+		}
+	}
+	if c.BackendMode() == BackendBWServe && c.serve != nil {
+		_ = c.serve.Stop(ctx)
 	}
 	c.mu.Lock()
-	c.session = ""
+	c.clearSessionLocked()
 	c.repromptTag = [32]byte{}
 	c.repromptReady = false
 	sessionDir := c.sessionDir
@@ -582,6 +855,9 @@ func (c *Client) encodePayload(raw map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, &CLIError{"encode payload", "serialization", 0}
 	}
+	if c.BackendMode() == BackendBWServe {
+		return b, nil
+	}
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
 	base64.StdEncoding.Encode(encoded, b)
 	for i := range b {
@@ -590,6 +866,11 @@ func (c *Client) encodePayload(raw map[string]any) ([]byte, error) {
 	return encoded, nil
 }
 func (c *Client) template(ctx context.Context, kind string) (map[string]any, error) {
+	// bw serve deliberately exposes CRUD rather than CLI template endpoints.
+	// The established minimal templates preserve the existing payload contract.
+	if c.BackendMode() == BackendBWServe {
+		return fallbackTemplate(kind), nil
+	}
 	b, err := c.raw(ctx, "get", "template", kind)
 	if err != nil {
 		// A failed CLI command is not an unavailable template: propagate

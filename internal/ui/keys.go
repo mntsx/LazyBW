@@ -62,6 +62,7 @@ func (a *App) bind(g *gocui.Gui) error {
 		{gocui.KeyCtrlP, "ctrl+p", nil},
 		{gocui.KeyCtrlD, "ctrl+d", nil},
 		{gocui.KeyCtrlR, "ctrl+r", nil},
+		{gocui.KeyCtrlB, "ctrl+b", nil},
 	}
 	for _, entry := range bindings {
 		spec := entry
@@ -169,7 +170,7 @@ func (a *App) bindWordKeys(register func(interface{}, gocui.Modifier, func(*gocu
 // shared by Master password, API credentials, Find and the detail editor.
 func (a *App) wordEdit(direction int, remove bool) error {
 	s := a.S
-	if s.Popup != nil || s.Mode == DialogServer || s.Screen == AuthChecking ||
+	if s.Popup != nil || (s.Mode == DialogServer || s.Mode == DialogBackend) || s.Screen == AuthChecking ||
 		a.creationTextInputLocked() {
 		return nil
 	}
@@ -252,7 +253,7 @@ func (a *App) creationTextInputLocked() bool {
 
 func (a *App) char(r rune) error {
 	s := a.S
-	if s.Mode == DialogServer || s.Screen == AuthChecking || s.Screen == AuthOffline {
+	if s.Mode == DialogServer || s.Mode == DialogBackend || s.Screen == AuthChecking || s.Screen == AuthOffline {
 		return nil
 	}
 	if s.Popup != nil {
@@ -574,7 +575,7 @@ func (a *App) setAuthValue(v string) {
 // deleteForward removes the next character from any active text input.
 func (a *App) deleteForward() error {
 	s := a.S
-	if s.Popup != nil || s.Mode == DialogServer || s.Screen == AuthChecking {
+	if s.Popup != nil || (s.Mode == DialogServer || s.Mode == DialogBackend) || s.Screen == AuthChecking {
 		return nil
 	}
 	if s.Mode == DialogReprompt {
@@ -605,7 +606,7 @@ func (a *App) deleteForward() error {
 }
 
 func (a *App) backspace() error {
-	if a.S.Screen == AuthChecking || a.S.Mode == DialogServer {
+	if a.S.Screen == AuthChecking || a.S.Mode == DialogServer || a.S.Mode == DialogBackend {
 		return nil
 	}
 	if a.S.Popup != nil {
@@ -646,7 +647,7 @@ func (a *App) arrow(vertical, horizontal int) error {
 	if s.Screen == AuthChecking || a.creationValidationPending() {
 		return nil
 	}
-	if s.Screen == AuthOffline && s.Mode != DialogServer {
+	if s.Screen == AuthOffline && s.Mode != DialogServer && s.Mode != DialogBackend {
 		a.requestQuit()
 		return nil
 	}
@@ -673,6 +674,28 @@ func (a *App) arrow(vertical, horizontal int) error {
 				s.ServerChoice = choices[index]
 			}
 			s.ServerMoved = true
+		}
+		return nil
+	}
+	if s.Mode == DialogBackend {
+		if vertical != 0 {
+			choices := make([]int, 0, 2)
+			for i := 0; i < 2; i++ {
+				if s.BackendReady[i] {
+					choices = append(choices, i)
+				}
+			}
+			if len(choices) > 0 {
+				index := 0
+				for i, value := range choices {
+					if value == s.BackendChoice {
+						index = i
+						break
+					}
+				}
+				s.BackendChoice = choices[max(0, min(len(choices)-1, index+vertical))]
+			}
+			s.BackendMoved = true
 		}
 		return nil
 	}
@@ -956,12 +979,16 @@ func (a *App) enter() error {
 	if s.Screen == AuthChecking {
 		return nil
 	}
-	if s.Screen == AuthOffline && s.Mode != DialogServer {
+	if s.Screen == AuthOffline && s.Mode != DialogServer && s.Mode != DialogBackend {
 		a.requestQuit()
 		return nil
 	}
 	if s.Mode == DialogServer {
 		a.selectServerChoice()
+		return nil
+	}
+	if s.Mode == DialogBackend {
+		a.selectBackendChoice()
 		return nil
 	}
 
@@ -981,6 +1008,9 @@ func (a *App) enter() error {
 			return nil
 		}
 		if p.Acknowledge {
+			if p.AcknowledgeAction != nil {
+				p.AcknowledgeAction()
+			}
 			return nil
 		}
 		if p.Action != nil {
@@ -1221,8 +1251,12 @@ func (a *App) escape() error {
 		a.closeServerPicker()
 		return nil
 	}
+	if s.Mode == DialogBackend {
+		a.closeBackendPicker()
+		return nil
+	}
 	if s.Popup != nil {
-		if s.Popup.Blocking {
+		if s.Popup.Blocking || s.Popup.AcknowledgeAction != nil {
 			return nil
 		}
 		if s.Busy {
@@ -1400,8 +1434,13 @@ func (a *App) clickAt(x, y int) error {
 		by := a.dialogY + a.dialogH - 4
 		if y >= by && y <= by+1 {
 			if p.Acknowledge {
-				okX := a.dialogX + (a.dialogW-10)/2
-				if x < okX || x >= okX+10 {
+				label := p.AcknowledgeText
+				if label == "" {
+					label = "OK"
+				}
+				width := symmetricButtonWidth(label, 10)
+				okX := a.dialogX + (a.dialogW-width)/2
+				if x < okX || x >= okX+width {
 					return nil
 				}
 				return a.enter()
@@ -1442,6 +1481,23 @@ func (a *App) clickAt(x, y int) error {
 		}
 		return nil
 	}
+	if s.Mode == DialogBackend {
+		w, h := 100, 32
+		if a.gui != nil {
+			w, h = a.width(), a.height()
+		}
+		dx, dy, dw, _ := serverPickerGeometry(w, h)
+		if x >= dx+3 && x < dx+dw-3 && y >= dy+3 && y <= dy+4 {
+			choice := y - dy - 3
+			if !s.BackendReady[choice] {
+				return nil
+			}
+			s.BackendChoice = choice
+			s.BackendMoved = true
+			return a.enter()
+		}
+		return nil
+	}
 	if s.Mode == DialogServer {
 		w, h := 100, 32
 		if a.gui != nil {
@@ -1470,6 +1526,10 @@ func (a *App) clickAt(x, y int) error {
 		return nil
 	}
 	if s.Screen != Workspace {
+		if !s.LocalMode && y == 2 && x >= 2 && x < 20 {
+			a.openBackendPicker()
+			return nil
+		}
 		return a.authClickAt(x, y, a.width(), a.height())
 	}
 	if s.Mode == DialogCreate || s.Mode == DialogFieldType || s.Mode == DialogWebsite ||

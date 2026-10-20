@@ -39,6 +39,11 @@ func Run(ctx context.Context, cfg config.Config, cli *bitwarden.Client, options 
 	}
 	defer func() { options.Password = "" }()
 	options.report("Validating replica settings...")
+	if len(cfg.Authentication.BackendMode) > 0 {
+		if _, err := cli.SelectAvailableBackend(ctx, cfg.Authentication.BackendMode); err != nil {
+			return fmt.Errorf("select Bitwarden backend: %w", err)
+		}
+	}
 	if err := localvault.Validate(options.Path, cfg.Local.VaultEncryption); err != nil {
 		return err
 	}

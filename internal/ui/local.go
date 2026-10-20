@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/awesome-gocui/gocui"
+	"github.com/miguelmnts/lazybw-go/internal/bitwarden"
 	"github.com/miguelmnts/lazybw-go/internal/localvault"
 	"github.com/miguelmnts/lazybw-go/internal/network"
 	"github.com/miguelmnts/lazybw-go/internal/replica"
@@ -148,6 +149,93 @@ func (a *App) openServerPicker() {
 			}
 		}(index, endpoint)
 	}
+}
+
+func (a *App) openBackendPicker() {
+	s := a.S
+	if s.Screen == Workspace || s.LocalMode || s.Busy || s.Mode != Browse {
+		return
+	}
+	s.Mode = DialogBackend
+	s.BackendReady = [2]bool{}
+	s.BackendMoved = false
+	s.BackendChoice = -1
+	if s.Backend == bitwarden.BackendBW {
+		s.BackendChoice = 0
+	} else if s.Backend == bitwarden.BackendBWServe {
+		s.BackendChoice = 1
+	}
+	if a.pickerCancel != nil {
+		a.pickerCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.pickerCancel = cancel
+	if a.gui == nil {
+		return
+	}
+	for index, mode := range []bitwarden.BackendMode{bitwarden.BackendBW, bitwarden.BackendBWServe} {
+		go func(i int, mode bitwarden.BackendMode) {
+			err := s.CLI.BackendAvailable(ctx, mode)
+			if ctx.Err() != nil {
+				return
+			}
+			a.gui.Update(func(*gocui.Gui) error {
+				if a.S.Mode == DialogBackend {
+					a.S.BackendReady[i] = err == nil
+					if err == nil && !a.S.BackendMoved && bitwarden.BackendMode(a.S.Backend) == mode {
+						a.S.BackendChoice = i
+					}
+				}
+				return nil
+			})
+		}(index, mode)
+	}
+}
+
+func (a *App) closeBackendPicker() {
+	if a.pickerCancel != nil {
+		a.pickerCancel()
+		a.pickerCancel = nil
+	}
+	a.S.Mode = Browse
+}
+
+func (a *App) selectBackendChoice() {
+	s := a.S
+	if s.BackendChoice < 0 || s.BackendChoice > 1 || !s.BackendReady[s.BackendChoice] {
+		return
+	}
+	mode := []bitwarden.BackendMode{bitwarden.BackendBW, bitwarden.BackendBWServe}[s.BackendChoice]
+	a.closeBackendPicker()
+	if mode == s.Backend {
+		return
+	}
+	s.BackendFatal = false
+	s.Busy = true
+	s.BusyMessage = "Checking Bitwarden session"
+	s.Notice = ""
+	s.AuthID, s.AuthSecret = "", ""
+	s.ClearMaster()
+	s.AuthFocus, s.Caret, s.AuthVisible = 0, 0, false
+	s.Screen = AuthChecking
+	go func() {
+		err := s.CLI.SelectBackend(context.Background(), mode)
+		if a.gui == nil {
+			return
+		}
+		a.gui.Update(func(*gocui.Gui) error {
+			if err != nil {
+				s.Busy = false
+				s.Screen = AuthClient
+				s.Notice = "Selected Bitwarden backend is unavailable"
+				return nil
+			}
+			s.Backend = mode
+			s.BackendSelected = true
+			go a.startup(context.Background(), a.gui, true)
+			return nil
+		})
+	}()
 }
 
 func (a *App) closeServerPicker() {

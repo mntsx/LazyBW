@@ -170,7 +170,7 @@ func feedbackRequiresChange(action string) bool {
 // textEntryActive includes all textboxes, even modal name and login inputs.
 func (a *App) textEntryActive() bool {
 	s := a.S
-	if s.Popup != nil || s.Screen == AuthChecking || s.Mode == DialogServer {
+	if s.Popup != nil || s.Screen == AuthChecking || s.Mode == DialogServer || s.Mode == DialogBackend {
 		return false
 	}
 	if s.Screen != Workspace {
@@ -236,7 +236,7 @@ func (a *App) keyAction(key string) string {
 		}
 		return "unbound"
 	}
-	if s.Mode == DialogServer {
+	if s.Mode == DialogServer || s.Mode == DialogBackend {
 		switch key {
 		case "↑", "↓":
 			return "move"
@@ -254,6 +254,8 @@ func (a *App) keyAction(key string) string {
 		switch key {
 		case "ctrl+s":
 			return "server"
+		case "ctrl+b":
+			return "backend"
 		case "↑", "↓", "←", "→":
 			return "move"
 		case "enter":
