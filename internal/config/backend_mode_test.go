@@ -15,7 +15,7 @@ func TestBackendModeDefaultsAndStringCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"bw", "bw serve"}; !reflect.DeepEqual(cfg.Authentication.BackendMode, want) {
+	if want := []string{"bw serve", "bw"}; !reflect.DeepEqual(cfg.Authentication.BackendMode, want) {
 		t.Fatalf("default backend modes = %v, want %v", cfg.Authentication.BackendMode, want)
 	}
 	path := filepath.Join(directory, "settings.jsonc")

@@ -13,6 +13,7 @@ import (
 
 type jsonValueNode struct {
 	start, end int
+	keyStart   int
 	object     *jsonObjectNode
 }
 
@@ -95,6 +96,7 @@ func (parser *jsonParser) object(depth int) (*jsonObjectNode, error) {
 	}
 	for {
 		parser.space()
+		keyStart := parser.pos
 		key, err := parser.string()
 		if err != nil {
 			return nil, err
@@ -108,6 +110,7 @@ func (parser *jsonParser) object(depth int) (*jsonObjectNode, error) {
 		if err != nil {
 			return nil, err
 		}
+		value.keyStart = keyStart
 		object.fields[key] = value
 		object.lastValueEnd = value.end
 		parser.space()
@@ -248,7 +251,7 @@ func collectDefaultInsertions(source []byte, object *jsonObjectNode, defaults ma
 		return nil
 	}
 	closeIndent, insertionPosition, startsOnNewLine := objectClosingIndent(source, object)
-	childIndent := closeIndent + "  "
+	childIndent := objectChildIndent(source, object, closeIndent)
 	entries := make([]string, 0, len(missing))
 	for _, key := range missing {
 		encoded, err := json.MarshalIndent(defaults[key], "", "  ")
@@ -272,16 +275,62 @@ func collectDefaultInsertions(source []byte, object *jsonObjectNode, defaults ma
 }
 
 func objectClosingIndent(source []byte, object *jsonObjectNode) (string, int, bool) {
-	lineStart := object.end
-	for lineStart > 0 && source[lineStart-1] != '\n' && source[lineStart-1] != '\r' {
-		lineStart--
-	}
+	lineStart := lineStartAt(source, object.end)
 	prefix := source[lineStart:object.end]
 	if len(bytesTrimSpace(prefix)) == 0 {
 		return string(prefix), lineStart, true
 	}
-	indent := strings.Repeat("  ", object.depth)
+	indent := strings.Repeat(indentationUnit(source), object.depth)
 	return indent, object.end, false
+}
+
+// objectChildIndent preserves the indentation already used by an object's
+// fields. Inline or empty objects have no such reference, so use the file's
+// indentation unit instead of assuming two spaces.
+func objectChildIndent(source []byte, object *jsonObjectNode, closeIndent string) string {
+	for _, value := range object.fields {
+		lineStart := lineStartAt(source, value.keyStart)
+		prefix := source[lineStart:value.keyStart]
+		if len(prefix) > 0 && len(bytesTrimSpace(prefix)) == 0 {
+			return string(prefix)
+		}
+	}
+	return closeIndent + indentationUnit(source)
+}
+
+func lineStartAt(source []byte, position int) int {
+	for position > 0 && source[position-1] != '\n' && source[position-1] != '\r' {
+		position--
+	}
+	return position
+}
+
+func indentationUnit(source []byte) string {
+	unit := ""
+	for lineStart := 0; lineStart < len(source); {
+		lineEnd := lineStart
+		for lineEnd < len(source) && source[lineEnd] != '\n' && source[lineEnd] != '\r' {
+			lineEnd++
+		}
+		prefixEnd := lineStart
+		for prefixEnd < lineEnd && (source[prefixEnd] == ' ' || source[prefixEnd] == '\t') {
+			prefixEnd++
+		}
+		if prefixEnd > lineStart && prefixEnd < lineEnd {
+			candidate := string(source[lineStart:prefixEnd])
+			if unit == "" || len(candidate) < len(unit) {
+				unit = candidate
+			}
+		}
+		lineStart = lineEnd + 1
+		if lineEnd < len(source) && source[lineEnd] == '\r' && lineStart < len(source) && source[lineStart] == '\n' {
+			lineStart++
+		}
+	}
+	if unit == "" {
+		return "  "
+	}
+	return unit
 }
 
 func bytesTrimSpace(value []byte) []byte {

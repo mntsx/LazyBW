@@ -362,7 +362,7 @@ func Load(dir string) (Config, error) {
 	if err := createGitignore(dir); err != nil {
 		return Config{}, err
 	}
-	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw", "bw serve"}}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
+	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
 	if err != nil {
 		return Config{}, err
 	}
@@ -396,7 +396,7 @@ func Load(dir string) (Config, error) {
 		}
 	}
 	if len(c.Authentication.BackendMode) == 0 {
-		c.Authentication.BackendMode = []string{"bw", "bw serve"}
+		c.Authentication.BackendMode = []string{"bw serve", "bw"}
 	}
 	if raw := settings["local_replication"]; len(raw) > 0 {
 		var fields map[string]json.RawMessage

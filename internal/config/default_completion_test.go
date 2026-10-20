@@ -127,6 +127,37 @@ func TestLoadPersistsMissingKeybindDefaultsAndLegacyAliases(t *testing.T) {
 	}
 }
 
+func TestDefaultCompletionPreservesExistingIndentation(t *testing.T) {
+	for name, indentation := range map[string]string{
+		"four spaces": "    ",
+		"tabs":        "\t",
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			path := filepath.Join(directory, "settings.jsonc")
+			original := "{\n" +
+				indentation + "\"authentication\": {\n" +
+				indentation + indentation + "\"default_server\": \"eu\"\n" +
+				indentation + "},\n" +
+				indentation + "\"colors\": {}\n" +
+				"}\n"
+			if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(directory); err != nil {
+				t.Fatal(err)
+			}
+			content, _ := readCompletedObject(t, path)
+			if !strings.Contains(content, "\n"+indentation+indentation+"\"client_env_path\"") {
+				t.Fatalf("nested defaults did not retain %s indentation:\n%s", name, content)
+			}
+			if !strings.Contains(content, "\n"+indentation+"\"local_replication\"") {
+				t.Fatalf("root defaults did not retain %s indentation:\n%s", name, content)
+			}
+		})
+	}
+}
+
 func TestAtomicCompletionRefusesConcurrentChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.jsonc")
 	original := []byte(`{"authentication":{}}`)
