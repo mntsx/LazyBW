@@ -121,7 +121,7 @@ var DefaultIcons = Icons{
 		"server": "\U000F0379", "backend": "\U0000F013", "encryption": "\U000F0780", "local_vault": "\U000F01DA",
 	},
 	Layout: map[string]string{
-		"vault": "\U000F10E5", "items": "\U000F10E5", "folders": "\U000F10E5", "edits": "\U000EADDC", "connection": "\U000F0780",
+		"vault": "\U000F10E5", "items": "\U000F10E5", "folders": "\U000F10E5", "edits": "\U0000F440", "connection": "\U000F0780",
 	},
 	Items: map[string]string{
 		"all": "\U0000EB94", "favourite": "\U0000F005", "login": "\U000F059F", "secure_note": "\U0000F24A", "card": "\U0000F09D", "identity": "\U0000F2BB", "ssh_key": "\U000F0306", "folder": "\U000F0256", "no_folder": "\U000F19F9", "vault": "\U0000EDCA", "user": "\U0000F007",
