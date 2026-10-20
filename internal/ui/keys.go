@@ -1338,6 +1338,11 @@ func (a *App) submitAuth() {
 			return
 		}
 	}
+	// This marker is set only by the startup status check for LazyBW's private,
+	// permission-restricted profile. A login attempt consumes it so retries
+	// always perform the full status check after an uncertain result.
+	knownUnauthenticated := step == AuthClient && s.ClientUnauthenticated
+	s.ClientUnauthenticated = false
 	s.Busy = true
 	s.BusyMessage = "Authenticating"
 	go func() {
@@ -1372,7 +1377,11 @@ func (a *App) submitAuth() {
 				// which clears Busy and permits another unlock attempt.
 			}
 		} else if step == AuthClient {
-			err = s.CLI.Login(ctx, id, secret)
+			if knownUnauthenticated {
+				err = s.CLI.LoginUnauthenticated(ctx, id, secret)
+			} else {
+				err = s.CLI.Login(ctx, id, secret)
+			}
 		} else {
 			err = s.CLI.Unlock(ctx, password)
 		}
@@ -1395,6 +1404,7 @@ func (a *App) submitAuth() {
 			s.Caret = 0
 			if step == AuthClient {
 				s.Screen = AuthMaster
+				s.ClientUnauthenticated = false
 				s.LocalWarning = a.localWarning()
 				s.AuthFocus = 0
 				s.AuthSecret = ""

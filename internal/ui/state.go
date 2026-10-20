@@ -120,6 +120,7 @@ type State struct {
 	Caret                              int
 	InputSecret                        bool
 	AuthID, AuthSecret, Master         string
+	ClientUnauthenticated              bool
 	masterSealed                       *vault.Sealed
 	masterProtected                    bool
 	AuthFocus                          int

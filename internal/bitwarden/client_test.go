@@ -79,3 +79,48 @@ func TestEnvironmentOverridesRemoveInheritedSecrets(t *testing.T) {
 		t.Fatalf("expected environment entries are missing: %v", environment)
 	}
 }
+
+type authenticationRunner struct{ calls []string }
+
+func (r *authenticationRunner) Run(_ context.Context, args []string, _ []byte, _ []string) ([]byte, []byte, int, error) {
+	r.calls = append(r.calls, strings.Join(args, " "))
+	switch strings.Join(args, " ") {
+	case "--version":
+		return []byte("2026.10.0"), nil, 0, nil
+	case "login --apikey":
+		return nil, nil, 0, nil
+	default:
+		return nil, nil, 0, nil
+	}
+}
+
+func TestKnownUnauthenticatedLoginSkipsDuplicateStatus(t *testing.T) {
+	runner := &authenticationRunner{}
+	client, err := NewClient(runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.LoginUnauthenticated(context.Background(), "user.test", "test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(runner.calls, "|"); got != "login --apikey" {
+		t.Fatalf("known unauthenticated login made unexpected calls: %s", got)
+	}
+}
+
+func TestBackendVersionIsReusedForDisplay(t *testing.T) {
+	runner := &authenticationRunner{}
+	client, err := NewClient(runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.BackendAvailable(context.Background(), BackendBW); err != nil {
+		t.Fatal(err)
+	}
+	if version := client.Version(context.Background()); version != "2026.10.0" {
+		t.Fatalf("unexpected cached version: %q", version)
+	}
+	if got := strings.Join(runner.calls, "|"); got != "--version" {
+		t.Fatalf("version was queried more than once: %s", got)
+	}
+}

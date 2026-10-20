@@ -199,28 +199,33 @@ func (a *App) startupWithUpdates(
 		}
 		s.BackendSelected = true
 	}
-	if err := s.CLI.ConfigureRegion(ctx, s.Config.Directory, s.Server); err != nil {
+	status, err := s.CLI.ConfigureRegionStatus(ctx, s.Config.Directory, s.Server)
+	if err != nil {
 		update(func(*gocui.Gui) error {
 			s.Screen = AuthClient
 			s.Busy = false
+			s.ClientUnauthenticated = false
 			s.Notice = bitwarden.AuthenticationMessage(err, false)
 			return nil
 		})
 		return
 	}
+	// Backend selection already queried the version. Otherwise this lightweight
+	// display value is the only remaining CLI invocation before authentication.
 	version := s.CLI.Version(ctx)
 	update(func(*gocui.Gui) error { s.Version = version; return nil })
-	status, err := s.CLI.Status(ctx)
-	if err != nil {
+	if status == nil {
 		update(func(*gocui.Gui) error {
 			s.Screen = AuthClient
 			s.Busy = false
-			s.Notice = bitwarden.AuthenticationMessage(err, false)
+			s.ClientUnauthenticated = false
+			s.Notice = "Unable to check Bitwarden session"
 			return nil
 		})
 		return
 	}
 	state := fmt.Sprint(status["status"])
+	knownUnauthenticated := state == "unauthenticated"
 	if state == "unlocked" {
 		// A shell BW_SESSION belongs to an unknown profile: never reuse it.
 		state = "locked"
@@ -228,6 +233,7 @@ func (a *App) startupWithUpdates(
 	if state == "locked" {
 		update(func(*gocui.Gui) error {
 			s.Screen = AuthMaster
+			s.ClientUnauthenticated = false
 			s.LocalWarning = a.localWarning()
 			s.AuthFocus = 0
 			s.Caret = len([]rune(s.MasterText()))
@@ -255,10 +261,16 @@ func (a *App) startupWithUpdates(
 				s.BusyMessage = "Signing in with API credentials"
 				return nil
 			})
-			loginErr := s.CLI.Login(ctx, id, secret)
+			var loginErr error
+			if knownUnauthenticated {
+				loginErr = s.CLI.LoginUnauthenticated(ctx, id, secret)
+			} else {
+				loginErr = s.CLI.Login(ctx, id, secret)
+			}
 			if loginErr == nil {
 				update(func(*gocui.Gui) error {
 					s.Screen = AuthMaster
+					s.ClientUnauthenticated = false
 					s.LocalWarning = a.localWarning()
 					s.AuthFocus = 0
 					s.Caret = len([]rune(s.MasterText()))
@@ -267,14 +279,23 @@ func (a *App) startupWithUpdates(
 				})
 				return
 			}
+			// A failed request leaves the profile state uncertain. The next
+			// submission must use the complete status-checking login path.
+			knownUnauthenticated = false
 			// Do not display secrets or raw CLI responses in the UI.
 			update(func(*gocui.Gui) error {
+				s.ClientUnauthenticated = false
 				s.Notice = bitwarden.AuthenticationMessage(loginErr, false)
 				return nil
 			})
 		}
 	}
-	update(func(*gocui.Gui) error { s.Screen = AuthClient; s.Busy = false; return nil })
+	update(func(*gocui.Gui) error {
+		s.Screen = AuthClient
+		s.Busy = false
+		s.ClientUnauthenticated = knownUnauthenticated
+		return nil
+	})
 }
 func (a *App) loadVault(ctx context.Context, g *gocui.Gui) {
 	g.Update(func(*gocui.Gui) error { a.S.Busy = true; a.S.BusyMessage = "Loading vault"; return nil })

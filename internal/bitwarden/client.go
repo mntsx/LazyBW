@@ -126,6 +126,8 @@ type Client struct {
 	serve         *BWServeBackend
 	repromptTag   [32]byte
 	repromptReady bool
+	version       string
+	versionReady  bool
 	profileDir    string
 	sessionDir    string
 	sessionLock   *os.File
@@ -246,20 +248,28 @@ func decodeList(b []byte, operation string) ([]map[string]any, error) {
 // and verifies its endpoint. It does not change the user's default bw
 // configuration or shell environment.
 func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) error {
+	_, err := c.ConfigureRegionStatus(ctx, configDir, region)
+	return err
+}
+
+// ConfigureRegionStatus returns the authenticated state established while
+// configuring the isolated profile. Callers may reuse it only until they issue
+// another command that can alter that profile's authentication state.
+func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region string) (map[string]any, error) {
 	url := "https://vault.bitwarden.com"
 	switch region {
 	case "us":
 	case "eu":
 		url = "https://vault.bitwarden.eu"
 	default:
-		return errors.New("unsupported Bitwarden region")
+		return nil, errors.New("unsupported Bitwarden region")
 	}
 	if c.BackendMode() == BackendBWServe && c.serve != nil {
 		_ = c.serve.Stop(ctx)
 	}
 	profile, err := c.sessionProfile(configDir, region)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.mu.Lock()
 	c.profileDir = profile
@@ -269,34 +279,39 @@ func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) 
 	c.mu.Unlock()
 	b, err := c.rawCLI(ctx, "status")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	status, err := decodeObject(b, "bw status")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Preserve an existing, correctly configured profile. Re-running
 	// `bw config server` on each launch needlessly writes the CLI data file
 	// and may discard custom service endpoints set by the CLI itself.
 	if current, ok := status["serverUrl"].(string); ok &&
 		strings.TrimRight(current, "/") == url {
-		return nil
+		return status, nil
 	}
 	// Some CLI versions return an empty serverUrl for a fresh US profile.
 	// US is their built-in default and does not need reconfiguration.
 	if region == "us" && status["serverUrl"] == nil &&
 		status["status"] == "unauthenticated" {
-		return nil
+		return status, nil
 	}
 	// Never change the endpoint of a logged-in profile without first
 	// logging out; this is confined to LazyBW's isolated directory.
 	if status["status"] != "unauthenticated" {
 		if _, err := c.rawCLI(ctx, "logout"); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	_, err = c.rawCLI(ctx, "config", "server", url)
-	return err
+	if _, err = c.rawCLI(ctx, "config", "server", url); err != nil {
+		return nil, err
+	}
+	// A server change is permitted only after logout, or from an already
+	// unauthenticated profile. The successful command therefore leaves this
+	// private profile unauthenticated without another `bw status` process.
+	return map[string]any{"status": "unauthenticated", "serverUrl": url}, nil
 }
 
 func (c *Client) sessionProfile(configDir, region string) (string, error) {
@@ -471,6 +486,9 @@ func (c *Client) BackendAvailable(ctx context.Context, mode BackendMode) error {
 	if err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.version, c.versionReady = strings.Split(string(version), "\n")[0], true
+	c.mu.Unlock()
 	if mode == BackendBW {
 		return nil
 	}
@@ -540,11 +558,21 @@ func (c *Client) sessionValue() string {
 }
 
 func (c *Client) Version(ctx context.Context) string {
+	c.mu.Lock()
+	version, ready := c.version, c.versionReady
+	c.mu.Unlock()
+	if ready {
+		return version
+	}
 	b, err := c.rawCLI(ctx, "--version")
 	if err != nil {
 		return "unavailable"
 	}
-	return strings.Split(string(b), "\n")[0]
+	version = strings.Split(string(b), "\n")[0]
+	c.mu.Lock()
+	c.version, c.versionReady = version, true
+	c.mu.Unlock()
+	return version
 }
 func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 	// bw serve exits before it can expose /status for an unauthenticated
@@ -585,7 +613,20 @@ func (c *Client) Login(ctx context.Context, id, secret string) error {
 			return err
 		}
 	}
-	_, err = c.callCLI(ctx, "bw login --apikey", []string{"login", "--apikey"}, nil, []string{"BW_CLIENTID=" + id, "BW_CLIENTSECRET=" + secret}, false, "")
+	return c.loginAPIKey(ctx, id, secret)
+}
+
+// LoginUnauthenticated signs in a profile that this process has just verified
+// as unauthenticated. Callers must discard that fact after any login failure.
+func (c *Client) LoginUnauthenticated(ctx context.Context, id, secret string) error {
+	if c.BackendMode() == BackendBWServe {
+		_ = c.serve.Stop(ctx)
+	}
+	return c.loginAPIKey(ctx, id, secret)
+}
+
+func (c *Client) loginAPIKey(ctx context.Context, id, secret string) error {
+	_, err := c.callCLI(ctx, "bw login --apikey", []string{"login", "--apikey"}, nil, []string{"BW_CLIENTID=" + id, "BW_CLIENTSECRET=" + secret}, false, "")
 	return err
 }
 
