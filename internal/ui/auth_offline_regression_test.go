@@ -13,6 +13,15 @@ func TestAllVaultsDefault(t *testing.T) {
 	}
 }
 
+func TestConnectionIntervals(t *testing.T) {
+	if connectionLossCheckInterval != 5*time.Second || connectionLossThreshold != 5*time.Second {
+		t.Fatalf("connection loss intervals = %v and %v, want 5s", connectionLossCheckInterval, connectionLossThreshold)
+	}
+	if connectionRecoveryCheckInterval != 2500*time.Millisecond {
+		t.Fatalf("connection recovery interval = %v, want 2.5s", connectionRecoveryCheckInterval)
+	}
+}
+
 // TestAuthenticationConnectionLoss verifies the monitor on both login screens.
 func TestAuthenticationConnectionLoss(t *testing.T) {
 	for _, screen := range []Screen{AuthClient, AuthMaster} {

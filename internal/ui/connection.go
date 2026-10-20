@@ -8,11 +8,16 @@ import (
 	"github.com/miguelmnts/lazybw-go/internal/network"
 )
 
-const connectionCheckInterval = 2500 * time.Millisecond
+const (
+	connectionLossCheckInterval     = 5 * time.Second
+	connectionRecoveryCheckInterval = 2500 * time.Millisecond
+	connectionLossThreshold         = 5 * time.Second
+)
 
 // monitorConnection periodically probes the active region without invoking bw.
 func (a *App) monitorConnection(ctx context.Context) {
-	ticker := time.NewTicker(connectionCheckInterval)
+	ticker := time.NewTicker(connectionRecoveryCheckInterval)
+	var nextLossCheck time.Time
 	defer ticker.Stop()
 	for {
 		select {
@@ -27,6 +32,13 @@ func (a *App) monitorConnection(ctx context.Context) {
 				if (s.Screen != Workspace && s.Screen != AuthClient && s.Screen != AuthMaster) || s.LocalMode || a.exitRequested.Load() ||
 					!a.networkChecking.CompareAndSwap(false, true) {
 					return nil
+				}
+				if s.ServerConnected && time.Now().Before(nextLossCheck) {
+					a.networkChecking.Store(false)
+					return nil
+				}
+				if s.ServerConnected {
+					nextLossCheck = time.Now().Add(connectionLossCheckInterval)
 				}
 				region := s.Server
 				url := s.Config.Network.USPingURL
@@ -60,14 +72,12 @@ func (a *App) probeConnection(ctx context.Context, region, url string) {
 	})
 }
 
-const connectionLossThreshold = 2500 * time.Millisecond
-
 // applyConnectionResult applies one observed probe to the current region.
 func (a *App) applyConnectionResult(region string, available bool) {
 	a.applyConnectionResultAt(region, available, time.Now())
 }
 
-// applyConnectionResultAt only reports an outage after 2.5 seconds of
+// applyConnectionResultAt only reports an outage after 5 seconds of
 // consecutive failed observations. A success restores availability immediately.
 func (a *App) applyConnectionResultAt(region string, available bool, checkedAt time.Time) {
 	s := a.S
