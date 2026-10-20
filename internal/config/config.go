@@ -316,6 +316,21 @@ func preferred(dir, stem string) string {
 	}
 	return p
 }
+func createGitignore(dir string) error {
+	file, err := os.OpenFile(filepath.Join(dir, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create .gitignore: %w", err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString("bitwarden/\n"); err != nil {
+		return fmt.Errorf("write .gitignore: %w", err)
+	}
+	return nil
+}
+
 func DefaultDirectory() (string, error) {
 	if x := os.Getenv("LAZYBW_CONFIG_DIR"); x != "" {
 		return x, nil
@@ -337,6 +352,9 @@ func Load(dir string) (Config, error) {
 		}
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		return Config{}, err
+	}
+	if err := createGitignore(dir); err != nil {
 		return Config{}, err
 	}
 	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us"}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})

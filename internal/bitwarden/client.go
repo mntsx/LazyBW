@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,6 +125,7 @@ type Client struct {
 	repromptTag   [32]byte
 	repromptReady bool
 	profileDir    string
+	sessionDir    string
 	Cipher        *vault.Cipher
 }
 
@@ -204,8 +207,9 @@ func decodeList(b []byte, operation string) ([]map[string]any, error) {
 	return v, nil
 }
 
-// ConfigureRegion selects an isolated CLI profile and verifies its endpoint.
-// It does not change the user's default bw configuration or shell environment.
+// ConfigureRegion selects an isolated CLI profile for this LazyBW execution
+// and verifies its endpoint. It does not change the user's default bw
+// configuration or shell environment.
 func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) error {
 	url := "https://vault.bitwarden.com"
 	switch region {
@@ -215,12 +219,9 @@ func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) 
 	default:
 		return errors.New("unsupported Bitwarden region")
 	}
-	profile, err := filepath.Abs(filepath.Join(configDir, "bitwarden", region))
+	profile, err := c.sessionProfile(configDir, region)
 	if err != nil {
-		return fmt.Errorf("invalid Bitwarden profile directory: %w", err)
-	}
-	if err := os.MkdirAll(profile, 0700); err != nil {
-		return fmt.Errorf("cannot create Bitwarden profile: %w", err)
+		return err
 	}
 	c.mu.Lock()
 	c.profileDir = profile
@@ -254,6 +255,70 @@ func (c *Client) ConfigureRegion(ctx context.Context, configDir, region string) 
 	}
 	_, err = c.raw(ctx, "config", "server", url)
 	return err
+}
+
+func (c *Client) sessionProfile(configDir, region string) (string, error) {
+	c.mu.Lock()
+	if c.sessionDir != "" {
+		sessionDir := c.sessionDir
+		c.mu.Unlock()
+		profile := filepath.Join(sessionDir, region)
+		if err := os.MkdirAll(profile, 0700); err != nil {
+			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+		}
+		if err := os.Chmod(profile, 0700); err != nil {
+			return "", fmt.Errorf("cannot secure Bitwarden profile: %w", err)
+		}
+		return profile, nil
+	}
+	c.mu.Unlock()
+
+	base, err := filepath.Abs(filepath.Join(configDir, "bitwarden", "sessions"))
+	if err != nil {
+		return "", fmt.Errorf("invalid Bitwarden session directory: %w", err)
+	}
+	if err := os.MkdirAll(base, 0700); err != nil {
+		return "", fmt.Errorf("cannot create Bitwarden sessions directory: %w", err)
+	}
+	if err := os.Chmod(base, 0700); err != nil {
+		return "", fmt.Errorf("cannot secure Bitwarden sessions directory: %w", err)
+	}
+
+	for attempts := 0; attempts < 10; attempts++ {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", fmt.Errorf("cannot generate Bitwarden session ID: %w", err)
+		}
+		id := fmt.Sprintf("%d-%d-%s", time.Now().UnixNano(), os.Getpid(), hex.EncodeToString(random[:]))
+		sessionDir := filepath.Join(base, id)
+		if err := os.Mkdir(sessionDir, 0700); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", fmt.Errorf("cannot create Bitwarden session: %w", err)
+		}
+		profile := filepath.Join(sessionDir, region)
+		if err := os.Mkdir(profile, 0700); err != nil {
+			_ = os.RemoveAll(sessionDir)
+			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+		}
+
+		c.mu.Lock()
+		if c.sessionDir == "" {
+			c.sessionDir = sessionDir
+			c.mu.Unlock()
+			return profile, nil
+		}
+		activeSession := c.sessionDir
+		c.mu.Unlock()
+		_ = os.RemoveAll(sessionDir)
+		profile = filepath.Join(activeSession, region)
+		if err := os.MkdirAll(profile, 0700); err != nil {
+			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+		}
+		return profile, nil
+	}
+	return "", errors.New("cannot allocate unique Bitwarden session ID")
 }
 
 func (c *Client) Version(ctx context.Context) string {
@@ -409,7 +474,13 @@ func (c *Client) Close(ctx context.Context) {
 	c.session = ""
 	c.repromptTag = [32]byte{}
 	c.repromptReady = false
+	sessionDir := c.sessionDir
+	c.sessionDir = ""
+	c.profileDir = ""
 	c.mu.Unlock()
+	if sessionDir != "" {
+		_ = os.RemoveAll(sessionDir)
+	}
 	c.Cipher.Close()
 }
 

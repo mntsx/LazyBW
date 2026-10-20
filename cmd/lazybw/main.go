@@ -77,13 +77,10 @@ func runTUI(cfg config.Config) error {
 	if err != nil {
 		return errors.New("unable to initialize encrypted vault session")
 	}
+	defer cli.Close(context.Background())
 	state := ui.NewState(cfg, cli)
 	app := ui.New(state)
-	if err = app.Run(); err != nil {
-		return err
-	}
-	cli.Close(context.Background())
-	return nil
+	return app.Run()
 }
 
 func parseReplicate(args []string, cfg config.Config, output io.Writer) (replica.Options, bool, error) {

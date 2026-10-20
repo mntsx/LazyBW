@@ -38,6 +38,38 @@ func TestDefaultFilesAndPrecedence(t *testing.T) {
 		t.Fatal("JSONC must take precedence")
 	}
 }
+func TestLoadCreatesGitignoreForBitwardenData(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "bitwarden/\n" {
+		t.Fatalf(".gitignore = %q, want bitwarden/", contents)
+	}
+}
+
+func TestLoadPreservesExistingGitignore(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(path, []byte("custom/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "custom/\n" {
+		t.Fatalf("existing .gitignore was changed: %q", contents)
+	}
+}
+
 func TestKeybindOverridesReplaceDefaults(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "keybinds.jsonc"), []byte(`{

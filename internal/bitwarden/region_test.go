@@ -14,9 +14,11 @@ type regionCall struct {
 	env  []string
 }
 type regionRunner struct {
-	calls  []regionCall
-	server map[string]string
-	status map[string]string
+	calls         []regionCall
+	server        map[string]string
+	status        map[string]string
+	defaultServer string
+	defaultStatus string
 }
 
 func (r *regionRunner) Run(_ context.Context, args []string, _ []byte, env []string) ([]byte, []byte, int, error) {
@@ -32,9 +34,15 @@ func (r *regionRunner) Run(_ context.Context, args []string, _ []byte, env []str
 	case "status":
 		server := r.server[profile]
 		if server == "" {
+			server = r.defaultServer
+		}
+		if server == "" {
 			server = "https://vault.bitwarden.com"
 		}
 		status := r.status[profile]
+		if status == "" {
+			status = r.defaultStatus
+		}
 		if status == "" {
 			status = "unauthenticated"
 		}
@@ -72,10 +80,12 @@ func TestIsolatedRegionsAndSessions(t *testing.T) {
 	if err := client.ConfigureRegion(ctx, dir, "eu"); err != nil {
 		t.Fatal(err)
 	}
-	eu := filepath.Join(dir, "bitwarden", "eu")
-	us := filepath.Join(dir, "bitwarden", "us")
+	eu := envValue(runner.calls[len(runner.calls)-1].env, "BITWARDENCLI_APPDATA_DIR")
 	if runner.server[eu] != "https://vault.bitwarden.eu" {
 		t.Fatalf("EU endpoint not configured: %v", runner.server)
+	}
+	if filepath.Base(eu) != "eu" || filepath.Dir(filepath.Dir(eu)) != filepath.Join(dir, "bitwarden", "sessions") {
+		t.Fatalf("EU profile has unexpected path: %q", eu)
 	}
 	if client.HasSession() {
 		t.Fatal("previous profile session reused")
@@ -97,8 +107,9 @@ func TestIsolatedRegionsAndSessions(t *testing.T) {
 	if _, err := client.ses(ctx, "list", "folders"); err != nil {
 		t.Fatal(err)
 	}
-	if got := envValue(runner.calls[len(runner.calls)-1].env, "BITWARDENCLI_APPDATA_DIR"); got != us {
-		t.Fatalf("US command went to %q", got)
+	us := envValue(runner.calls[len(runner.calls)-1].env, "BITWARDENCLI_APPDATA_DIR")
+	if filepath.Base(us) != "us" || filepath.Dir(us) != filepath.Dir(eu) {
+		t.Fatalf("US profile must share the session directory: eu=%q us=%q", eu, us)
 	}
 	client.SetSession("US-session")
 	if _, err := client.ses(ctx, "list", "items"); err != nil {
@@ -116,21 +127,27 @@ func TestIsolatedRegionsAndSessions(t *testing.T) {
 		strings.Join(runner.calls[before].args, " ") != "status" {
 		t.Fatal("re-entering a configured region must only check status")
 	}
-	if info, err := os.Stat(us); err != nil || info.Mode().Perm() != 0700 {
-		t.Fatalf("profile permissions: %v %v", info, err)
+	for _, path := range []string{filepath.Join(dir, "bitwarden", "sessions"), filepath.Dir(us), us} {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0700 {
+			t.Fatalf("directory permissions for %q: %v %v", path, info, err)
+		}
 	}
 	if err := client.ConfigureRegion(ctx, dir, "custom"); err == nil {
 		t.Fatal("unknown regions must be rejected")
+	}
+	sessionDir := filepath.Dir(us)
+	client.Close(ctx)
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("session directory was not removed: %v", err)
 	}
 }
 
 func TestMismatchedProfileLogsOutWithinProfileOnly(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	profile := filepath.Join(dir, "bitwarden", "eu")
 	runner := &regionRunner{
-		server: map[string]string{profile: "https://vault.bitwarden.com"},
-		status: map[string]string{profile: "locked"},
+		defaultServer: "https://vault.bitwarden.com",
+		defaultStatus: "locked",
 	}
 	client, _ := NewClient(runner)
 	if err := client.ConfigureRegion(ctx, dir, "eu"); err != nil {
