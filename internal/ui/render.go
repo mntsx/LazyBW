@@ -353,6 +353,26 @@ func drawMainBorders(c *Canvas, separators []int, sideRows []int, footerY int, s
 	}
 }
 
+func (a *App) icon(section, name string) string {
+	return a.S.Config.Icon(section, name)
+}
+
+func (a *App) itemIcon(itemType int) string {
+	name := map[int]string{
+		vault.Login: "login", vault.SecureNote: "secure_note", vault.Card: "card",
+		vault.Identity: "identity", vault.SSHKey: "ssh_key",
+	}[itemType]
+	return a.icon("items", name)
+}
+
+func (a *App) fieldIcon(option customFieldOption) string {
+	if option.Name == "Website" {
+		return a.icon("contents", "web")
+	}
+	name := map[int]string{0: "text", 1: "hidden", 2: "checkbox", 3: "linked"}[option.BitwardenType]
+	return a.icon("contents", name)
+}
+
 func (a *App) mainRender(c *Canvas) {
 	s := a.S
 	w, h := c.W, c.H
@@ -377,10 +397,10 @@ func (a *App) mainRender(c *Canvas) {
 		name, icon string
 		pane       Pane
 	}{
-		{"Vault", vault.IconFilter, PaneVault},
-		{"Items", vault.IconFilter, PaneTypes},
-		{"Folders", vault.IconFilter, PaneFolders},
-		{"Edits", vault.IconChanges, PaneChanges},
+		{"Vault", a.icon("layout", "vault"), PaneVault},
+		{"Items", a.icon("layout", "items"), PaneTypes},
+		{"Folders", a.icon("layout", "folders"), PaneFolders},
+		{"Edits", a.icon("layout", "edits"), PaneChanges},
 	}
 	if s.LocalMode {
 		panels = panels[1:3]
@@ -495,8 +515,12 @@ func (a *App) header(c *Canvas, x, y, w int, name, icon string, pane Pane) {
 		}
 		c.Text(x+2, y, fmt.Sprintf("%d", visibleNumber), color, CTitle)
 	}
-	c.Text(x+5, y, icon, CBlue, CTitle)
-	c.Text(x+7, y, minWidth(name, w-8), CWhite, CTitle)
+	nameX := x + 5
+	if icon != "" {
+		c.Text(nameX, y, icon, CBlue, CTitle)
+		nameX += 2
+	}
+	c.Text(nameX, y, minWidth(name, max(0, x+w-nameX-1)), CWhite, CTitle)
 }
 
 // panelRuleColor highlights only the panel currently receiving navigation.
@@ -527,21 +551,21 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 	switch pane {
 	case PaneVault:
 		opts = []string{"All vaults", "My vault"}
-		glyphs = []string{"\uedca", "\uf007"}
+		glyphs = []string{a.icon("items", "vault"), a.icon("items", "user")}
 		selected = 1 - s.Filters[0]
 		applied = 1 - s.FilterVault
 	case PaneTypes:
 		opts = []string{"All items", "Favourites", "Login", "Card", "Identity", "Secure note", "SSH key"}
-		glyphs = []string{vault.IconAll, "\U000f04ce", vault.TypeIcons[1], vault.TypeIcons[3], vault.TypeIcons[4], vault.TypeIcons[2], vault.TypeIcons[5]}
+		glyphs = []string{a.icon("items", "all"), a.icon("items", "favourite"), a.itemIcon(vault.Login), a.itemIcon(vault.Card), a.itemIcon(vault.Identity), a.itemIcon(vault.SecureNote), a.itemIcon(vault.SSHKey)}
 		selected = s.Filters[1]
 		applied = s.FilterType
 	case PaneFolders:
 		opts = []string{"No Folder"}
-		glyphs = []string{"\U000F19F9"}
+		glyphs = []string{a.icon("items", "no_folder")}
 		for _, f := range s.Folders {
 			index := len(opts)
 			opts = append(opts, fmt.Sprint(f["name"]))
-			glyphs = append(glyphs, vault.IconFolder)
+			glyphs = append(glyphs, a.icon("items", "folder"))
 			if change := s.Stage.Get(vault.Key("folder", fmt.Sprint(f["id"]))); change != nil {
 				folderMarkers[index] = change.Kind
 			}
@@ -551,7 +575,7 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 			if change.Entity == "folder" && change.Kind == vault.Deleted {
 				index := len(opts)
 				opts = append(opts, change.Name)
-				glyphs = append(glyphs, vault.IconFolder)
+				glyphs = append(glyphs, a.icon("items", "folder"))
 				folderMarkers[index] = vault.Deleted
 				deletedFolderRows[index] = true
 			}
@@ -562,7 +586,7 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 		for _, v := range s.ChangesList() {
 			opts = append(opts, v.Name)
 			if v.Entity == "folder" {
-				glyphs = append(glyphs, vault.IconFolder)
+				glyphs = append(glyphs, a.icon("items", "folder"))
 			} else {
 				code := 1
 				for t, label := range vault.TypeNames {
@@ -571,7 +595,7 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 						break
 					}
 				}
-				glyphs = append(glyphs, vault.TypeIcons[code])
+				glyphs = append(glyphs, a.itemIcon(code))
 			}
 		}
 		selected = s.ChangeIndex
@@ -606,7 +630,11 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 			drawSelectionStripe(c, x, yy, 1, indicator, bg)
 		}
 		ic := glyphs[i]
-		c.Text(x+3, yy, ic, CBlue, bg)
+		labelX := x + 3
+		if ic != "" {
+			c.Text(labelX, yy, ic, CBlue, bg)
+			labelX += 2
+		}
 		count := fmt.Sprintf("%d/%d", i+1, len(opts))
 		countX := x + w - utf8.RuneCountInString(count) - 2
 		labelLimit := x + w - 6
@@ -618,7 +646,7 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 		if pane == PaneChanges && s.ImportedChangeAt(i) || deletedFolderRows[i] {
 			fg = CBBlack
 		}
-		c.Text(x+5, yy, minWidth(opts[i], max(0, labelLimit-x-5)), fg, bg)
+		c.Text(labelX, yy, minWidth(opts[i], max(0, labelLimit-labelX)), fg, bg)
 		if keyboard {
 			c.Text(countX, yy, count, CBBlack, bg)
 		}
@@ -728,26 +756,31 @@ func (a *App) itemsPanel(c *Canvas, x, y, w, h int) {
 		if ch := s.Stage.Get(vault.Key("item", it.ID())); ch != nil {
 			kind = ch.Kind
 		}
-		c.Text(x+4, nameY, vault.TypeIcons[it.Type()], CBlue, bg)
+		itemIcon := a.itemIcon(it.Type())
+		nameX := x + 4
+		if itemIcon != "" {
+			c.Text(nameX, nameY, itemIcon, CBlue, bg)
+			nameX += 4
+		}
 		name := it.Name()
-		nameWidth := max(1, ownerX-x-10)
+		nameWidth := max(1, ownerX-nameX-2)
 		if ownerX < x+12 {
-			nameWidth = max(1, w-19)
+			nameWidth = max(1, w-(nameX-x)-11)
 		}
 		visibleName := minWidth(name, nameWidth)
 		if it.Favorite() && nameWidth >= 3 {
 			visibleName = minWidth(name, nameWidth-2)
-			c.TextBold(x+9+utf8.RuneCountInString(visibleName), nameY,
-				"\uf005", CBYellow, bg)
+			c.TextBold(nameX+utf8.RuneCountInString(visibleName)+1, nameY,
+				a.S.Config.FavouriteIcon("items"), CBYellow, bg)
 		}
-		c.TextBold(x+8, nameY, visibleName, fg, bg)
+		c.TextBold(nameX, nameY, visibleName, fg, bg)
 		if s.Search != "" {
 			ok, indices, _ := vault.FuzzyMatch(name, s.Search)
 			if ok {
 				rn := []rune(name)
 				for _, idx := range indices {
-					xx := x + 8 + idx
-					if xx < x+8+utf8.RuneCountInString(visibleName) {
+					xx := nameX + idx
+					if xx < nameX+utf8.RuneCountInString(visibleName) {
 						c.PutBold(xx, nameY, rn[idx], CMagenta, bg)
 					}
 				}
@@ -760,7 +793,7 @@ func (a *App) itemsPanel(c *Canvas, x, y, w, h int) {
 		} else {
 			preview = it.Subtitle()
 		}
-		c.Text(x+8, subtitleY, minWidth(preview, nameWidth), CSubtitle, bg)
+		c.Text(nameX, subtitleY, minWidth(preview, nameWidth), CSubtitle, bg)
 		if ownerX >= x+11 {
 			center(it.Owner(), ownerX, ownerWidth, nameY, CWhite, bg)
 			stateText, stateFG := "NA", CWhite
@@ -870,7 +903,7 @@ func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 	}
 	s := a.S
 	const title = "Last modified:"
-	a.header(c, x, y, w, title, "\uf0ce", PaneContent)
+	a.header(c, x, y, w, title, a.icon("contents", "last_modified"), PaneContent)
 	item := s.SelectedItem()
 	if timestamp, color, dim := itemModifiedTimestamp(s, item); timestamp != "" {
 		timestampX := x + 8 + utf8.RuneCountInString(title)
@@ -883,9 +916,9 @@ func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 	}
 	if item != nil && w >= 13 {
 		if item.Favorite() {
-			c.TextBold(x+w-3, y, "\uf005", CBYellow, CTitle)
+			c.TextBold(x+w-3, y, a.S.Config.FavouriteIcon("contents"), CBYellow, CTitle)
 		} else {
-			c.TextDim(x+w-3, y, "\uf005", CWhite, CTitle)
+			c.TextDim(x+w-3, y, a.S.Config.FavouriteIcon("contents"), CWhite, CTitle)
 		}
 		if kind := s.FavouriteKind(item); kind != "" {
 			c.Text(x+w-9, y, string(kind), stageKindColor(kind), CTitle)
@@ -1004,7 +1037,7 @@ func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 			name = f.Name
 		}
 	}
-	a.header(c, x, y, w, name, "\uf044", PaneDetail)
+	a.header(c, x, y, w, name, a.icon("contents", "edit"), PaneDetail)
 	c.Line(x, y+1, w, '━', panelRuleColor(s.Focus == PaneDetail), CDefault)
 	c.Fill(x, y+2, w, h-2, ' ', CWhite, CBlack)
 	value := s.Input
@@ -1121,7 +1154,10 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 		right = "• Local"
 	}
 	if connectionLost {
-		right = websiteFieldOption.Icon + " Server connexion lost"
+		right = "Server connexion lost"
+		if icon := a.icon("layout", "connection"); icon != "" {
+			right = icon + " " + right
+		}
 	} else if s.Busy || s.BackupBusy {
 		frames := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 		right = fmt.Sprintf("%c %s", frames[s.Spinner%len(frames)], s.BusyMessage)

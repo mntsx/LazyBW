@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -26,13 +27,66 @@ type Network struct {
 	USPingURL string `json:"us_ping_url"`
 	EUPingURL string `json:"eu_ping_url"`
 }
+type Icons struct {
+	Enabled         bool                         `json:"enabled"`
+	Authentication  map[string]string            `json:"authentication"`
+	Layout          map[string]string            `json:"layout"`
+	Items           map[string]string            `json:"items"`
+	Contents        map[string]string            `json:"contents"`
+	Dialogs         map[string]string            `json:"dialogs"`
+}
+
+type Visual struct {
+	Icons  Icons             `json:"icons"`
+	Colors map[string]string `json:"colors"`
+}
+
 type Config struct {
 	Authentication Authentication                 `json:"authentication"`
 	Local          Local                          `json:"local_replication"`
 	Network        Network                        `json:"network"`
-	Colors         map[string]string              `json:"colors"`
+	Visual         Visual                         `json:"visual"`
+	// Colors is retained for callers while the on-disk setting lives in visual.colors.
+	Colors         map[string]string              `json:"-"`
 	Keybinds       map[string]map[string][]string `json:"-"`
 	Directory      string                         `json:"-"`
+}
+
+// Icon returns a configured icon. Disabled icons are rendered as empty text.
+func (c Config) Icon(section, name string) string {
+	iconsConfig := c.Visual.Icons
+	// Preserve the defaults for in-memory configurations created by older
+	// callers; a configured icons object with enabled=false disables glyphs.
+	if !iconsConfig.Enabled {
+		if iconsConfig.Authentication == nil && iconsConfig.Layout == nil && iconsConfig.Items == nil && iconsConfig.Contents == nil && iconsConfig.Dialogs == nil {
+			iconsConfig = DefaultIcons
+		} else {
+			return ""
+		}
+	}
+	var icons map[string]string
+	switch section {
+	case "authentication":
+		icons = iconsConfig.Authentication
+	case "layout":
+		icons = iconsConfig.Layout
+	case "items":
+		icons = iconsConfig.Items
+	case "contents":
+		icons = iconsConfig.Contents
+	case "dialogs":
+		icons = iconsConfig.Dialogs
+	}
+	return icons[name]
+}
+
+// FavouriteIcon uses an ASCII marker when visual icons are disabled.
+func (c Config) FavouriteIcon(section string) string {
+	icons := c.Visual.Icons
+	if !icons.Enabled && (icons.Authentication != nil || icons.Layout != nil || icons.Items != nil || icons.Contents != nil || icons.Dialogs != nil) {
+		return "f"
+	}
+	return c.Icon(section, "favourite")
 }
 
 // DefaultColors contains both terminal palette overrides and UI-specific roles.
@@ -59,6 +113,23 @@ var DefaultColors = map[string]string{
 	"bright_cyan": "ansi_bright_cyan", "bright_white": "ansi_bright_white",
 	"hint_key": "ansi256:250", "hint_action": "ansi256:244",
 	"subtitle": "ansi256:249",
+}
+
+var DefaultIcons = Icons{
+	Enabled: true,
+	Authentication: map[string]string{
+		"server": "\U000F0379", "backend": "\U0000F013", "encryption": "\U000F0780", "local_vault": "\U000F01DA",
+	},
+	Layout: map[string]string{
+		"vault": "\U000F10E5", "items": "\U000F10E5", "folders": "\U000F10E5", "edits": "\U000EADDC", "connection": "\U000F0780",
+	},
+	Items: map[string]string{
+		"all": "\U0000EB94", "favourite": "\U0000F005", "login": "\U000F059F", "secure_note": "\U0000F24A", "card": "\U0000F09D", "identity": "\U0000F2BB", "ssh_key": "\U000F0306", "folder": "\U000F0256", "no_folder": "\U000F19F9", "vault": "\U0000EDCA", "user": "\U0000F007",
+	},
+	Contents: map[string]string{
+		"web": "\U000F059F", "favourite": "\U0000F005", "last_modified": "\U0000F0CE", "edit": "\U0000F044", "text": "\U000F0284", "hidden": "\U000F07F5", "checkbox": "\U000F0135", "linked": "\U000F0339",
+	},
+	Dialogs: map[string]string{"cancel": "\U000F073A", "linked_field": "\U000F0339"},
 }
 
 // A list is ordered: its first key is displayed in footer hints.
@@ -256,8 +327,51 @@ func NormalizeJSONC(src []byte) ([]byte, error) {
 			}
 		}
 	}
-	return out, nil
+	return expandLongUnicodeEscapes(out)
 }
+
+// expandLongUnicodeEscapes accepts the readable \U000F0000 notation used for
+// icons in settings.jsonc before handing the document to the JSON decoder.
+func expandLongUnicodeEscapes(data []byte) ([]byte, error) {
+	var out strings.Builder
+	for index := 0; index < len(data); {
+		if data[index] != '\\' || index+1 >= len(data) || data[index+1] != 'U' {
+			out.WriteByte(data[index])
+			index++
+			continue
+		}
+		end := index + 2
+		for end < len(data) && end < index+10 && (data[end] >= '0' && data[end] <= '9' || data[end] >= 'A' && data[end] <= 'F' || data[end] >= 'a' && data[end] <= 'f') {
+			end++
+		}
+		// A previous LazyBW version emitted \U000EDCA (seven digits). Keep it
+		// readable while newly written configuration always uses eight digits.
+		if end-index-2 != 7 && end-index-2 != 8 {
+			return nil, fmt.Errorf("invalid long Unicode escape at byte %d: %q", index, data[index:end])
+		}
+		value, err := strconv.ParseUint(string(data[index+2:end]), 16, 32)
+		if err != nil || value > 0x10FFFF || value >= 0xD800 && value <= 0xDFFF {
+			return nil, fmt.Errorf("invalid long Unicode escape at byte %d: %q", index, data[index:end])
+		}
+		out.WriteRune(rune(value))
+		index = end
+	}
+	return []byte(out.String()), nil
+}
+
+// formatLongUnicodeEscapes keeps private-use glyphs readable in JSONC files.
+func formatLongUnicodeEscapes(data []byte) []byte {
+	var out strings.Builder
+	for _, r := range string(data) {
+		if r >= 0xE000 {
+			fmt.Fprintf(&out, `\U%08X`, r)
+		} else {
+			out.WriteRune(r)
+		}
+	}
+	return []byte(out.String())
+}
+
 func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
 	unlock, err := acquireConfigLock(path)
 	if err != nil {
@@ -273,6 +387,7 @@ func readObject(path string, defaults any) (map[string]json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		b = formatLongUnicodeEscapes(b)
 		b = annotateDefaults(filepath.Base(path), b)
 		b = append(b, '\n')
 		if err = writeConfigAtomic(path, b, nil, true); err != nil {
@@ -362,7 +477,23 @@ func Load(dir string) (Config, error) {
 	if err := createGitignore(dir); err != nil {
 		return Config{}, err
 	}
-	settings, err := readObject(preferred(dir, "settings"), map[string]any{"authentication": map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}}, "local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"}, "network": map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"}, "colors": DefaultColors})
+	settingsPath := preferred(dir, "settings")
+	settingsDefaults := map[string]any{
+		"authentication":     map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
+		"local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"},
+		"network":            map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
+		"visual":             Visual{Icons: DefaultIcons, Colors: DefaultColors},
+	}
+	// Complete legacy colors only when that former root object already exists.
+	if existing, readErr := os.ReadFile(settingsPath); readErr == nil {
+		if normalized, normalizeErr := NormalizeJSONC(existing); normalizeErr == nil {
+			var object map[string]json.RawMessage
+			if json.Unmarshal(normalized, &object) == nil && object["colors"] != nil {
+				settingsDefaults["colors"] = DefaultColors
+			}
+		}
+	}
+	settings, err := readObject(settingsPath, settingsDefaults)
 	if err != nil {
 		return Config{}, err
 	}
@@ -376,12 +507,12 @@ func Load(dir string) (Config, error) {
 	if field := validateKeybinds(keys); field != "" {
 		return Config{}, fmt.Errorf("%w in keybinds.jsonc: %s", errInvalidConfigValue, field)
 	}
-	c := Config{Directory: dir, Colors: map[string]string{}, Keybinds: map[string]map[string][]string{}}
+	c := Config{Directory: dir, Colors: map[string]string{}, Keybinds: map[string]map[string][]string{}, Visual: Visual{Icons: DefaultIcons, Colors: map[string]string{}}}
 	c.Local.VaultEncryption = "aes-256-gcm"
 	c.Network.USPingURL = "https://api.bitwarden.com"
 	c.Network.EUPingURL = "https://api.bitwarden.eu"
 	for k, v := range DefaultColors {
-		c.Colors[k] = v
+		c.Colors[k], c.Visual.Colors[k] = v, v
 	}
 	if raw := settings["authentication"]; len(raw) > 0 {
 		var fields map[string]json.RawMessage
@@ -415,13 +546,24 @@ func Load(dir string) (Config, error) {
 	}
 	// Missing, null and unknown regions consistently fall back to the US.
 	c.Authentication.DefaultServer = NormalizeServer(c.Authentication.DefaultServer)
+	if raw := settings["visual"]; len(raw) > 0 {
+		if err = json.Unmarshal(raw, &c.Visual); err != nil {
+			return Config{}, err
+		}
+		for k, v := range c.Visual.Colors {
+			c.Colors[k] = v
+		}
+	}
+	// Accept the former top-level colors object for existing configurations.
+	// It wins while it remains present, so completing visual cannot alter a
+	// user's existing palette.
 	if raw := settings["colors"]; len(raw) > 0 {
 		var override map[string]string
 		if err = json.Unmarshal(raw, &override); err != nil {
 			return Config{}, err
 		}
 		for k, v := range override {
-			c.Colors[k] = v
+			c.Colors[k], c.Visual.Colors[k] = v, v
 		}
 	}
 	for section, defaults := range DefaultKeybinds {
@@ -515,11 +657,27 @@ func annotateDefaults(filename string, jsonData []byte) []byte {
 		out.WriteString("// Each action accepts a list of keys. The first is used in hints.\n")
 		out.WriteString("// Examples: [\"s\", \"enter\"], [\"ctrl+p\"]. Existing strings still work.\n")
 	} else if filename == "settings.jsonc" {
-		out.WriteString("// Colors: transparent, ansi_<color>, ansi_bright_<color>, ansi256:0..255, #RRGGBB.\n")
+		out.WriteString("// Visual colors: transparent, ansi_<color>, ansi_bright_<color>, ansi256:0..255, #RRGGBB.\n")
 		out.WriteString("// Available colors: black, red, green, yellow, blue, magenta, cyan, white.\n")
 	}
 	for _, line := range strings.Split(string(jsonData), "\n") {
 		if filename == "settings.jsonc" {
+			switch line {
+			case "    \"icons\": {":
+				out.WriteString("    // Icons: set enabled to false to use text-only markers.\n")
+			case "      \"authentication\": {":
+				out.WriteString("      // Authentication\n")
+			case "      \"layout\": {":
+				out.WriteString("      // Layout\n")
+			case "      \"items\": {":
+				out.WriteString("      // Items\n")
+			case "      \"contents\": {":
+				out.WriteString("      // Contents\n")
+			case "      \"dialogs\": {":
+				out.WriteString("      // Dialogs\n")
+			case "    \"colors\": {":
+				out.WriteString("    // Colors\n")
+			}
 			match := defaultLine.FindStringSubmatch(line)
 			if len(match) > 0 {
 				if choices, ok := defaultEnum[match[2]]; ok {

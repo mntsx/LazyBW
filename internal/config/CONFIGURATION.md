@@ -3,14 +3,22 @@
 `settings.jsonc` and `keybinds.jsonc` are created the first time the program
 loads an empty configuration directory. Existing files are **not overwritten**.
 
-## Colors
+## Visuals
 
-`settings.jsonc` contains a `colors` object. Colors accept:
+`settings.jsonc` contains a `visual` object with `icons` and `colors`.
+Set `visual.icons.enabled` to `false` to hide configured glyphs; favourite
+markers are then rendered as ASCII `f`. Individual icon values are Unicode
+strings and can be replaced independently by category.
+
+Colors in `visual.colors` accept:
 
 - ANSI palette names such as `ansi_red` and `ansi_bright_green`.
 - True color strings like `#88AACC`.
 - Palette indices `ansi256:0` through `ansi256:255`.
 - `transparent` or `default` for the terminal default.
+
+The legacy top-level `colors` object is still read to preserve existing
+configuration files; new settings are written under `visual.colors`.
 
 The 16 ANSI color roles (`red`, `bright_red`, etc.) permit changing the
 existing UI palette. The additional `foreground`, `primary`, `muted`,

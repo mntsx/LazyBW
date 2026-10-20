@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,20 @@ func TestJSONC(t *testing.T) {
 		t.Fatalf("incorrect JSONC: %s", b)
 	}
 }
+func TestLongUnicodeEscapesInJSONC(t *testing.T) {
+	data, err := NormalizeJSONC([]byte(`{"icon":"\U000F0379"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]string
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["icon"] != "\U000F0379" {
+		t.Fatalf("icon = %q", value["icon"])
+	}
+}
+
 func TestDefaultFilesAndPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Load(dir)

@@ -258,6 +258,7 @@ func collectDefaultInsertions(source []byte, object *jsonObjectNode, defaults ma
 		if err != nil {
 			return err
 		}
+		encoded = formatLongUnicodeEscapes(encoded)
 		value := strings.ReplaceAll(string(encoded), "\n", "\n"+childIndent)
 		name, _ := json.Marshal(key)
 		entries = append(entries, childIndent+string(name)+": "+value)

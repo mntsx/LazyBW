@@ -122,14 +122,46 @@ func validateSettings(settings map[string]json.RawMessage) string {
 			return "network." + field
 		}
 	}
-	colors, ok := objectField(settings, "colors")
+	// The former top-level colors object remains valid for existing files.
+	if colors, exists := settings["colors"]; exists {
+		var legacy map[string]json.RawMessage
+		if json.Unmarshal(colors, &legacy) != nil || legacy == nil {
+			return "colors"
+		}
+		for name := range legacy {
+			value, ok := stringField(legacy, name, false)
+			if !ok || !validColor(value) {
+				return "colors." + name
+			}
+		}
+	}
+	visual, ok := objectField(settings, "visual")
 	if !ok {
-		return "colors"
+		return "visual"
+	}
+	colors, ok := objectField(visual, "colors")
+	if !ok {
+		return "visual.colors"
 	}
 	for name := range colors {
 		value, ok := stringField(colors, name, false)
 		if !ok || !validColor(value) {
-			return "colors." + name
+			return "visual.colors." + name
+		}
+	}
+	icons, ok := objectField(visual, "icons")
+	if !ok || !boolField(icons, "enabled") {
+		return "visual.icons"
+	}
+	for _, section := range []string{"authentication", "layout", "items", "contents", "dialogs"} {
+		values, ok := objectField(icons, section)
+		if !ok {
+			return "visual.icons." + section
+		}
+		for name := range values {
+			if _, ok := stringField(values, name, false); !ok {
+				return "visual.icons." + section + "." + name
+			}
 		}
 	}
 	return ""

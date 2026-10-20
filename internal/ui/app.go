@@ -553,14 +553,15 @@ func (a *App) serverPickerRender(c *Canvas) {
 			fg = CBBlack
 		}
 		c.Fill(x+3, row, w-6, 1, ' ', fg, bg)
-		glyph := websiteFieldOption.Icon
-		if i == 2 {
-			glyph = "\U000F0379"
+		glyph := a.icon("authentication", "server")
+		labelX := x + 4
+		if glyph != "" {
+			c.Text(labelX, row, glyph, icon, bg)
+			labelX += 2
 		}
-		c.Text(x+4, row, glyph, icon, bg)
-		c.Text(x+6, row, label, fg, bg)
+		c.Text(labelX, row, label, fg, bg)
 		if i == 2 {
-			c.Text(x+6+utf8.RuneCountInString("Local Vault "), row, "(READ ONLY)", CRed, bg)
+			c.Text(labelX+utf8.RuneCountInString("Local Vault "), row, "(READ ONLY)", CRed, bg)
 		}
 	}
 	authHints(c, y+h-2, joinConfiguredHints(
@@ -587,8 +588,12 @@ func (a *App) backendPickerRender(c *Canvas) {
 			fg, icon = CBBlack, CRed
 		}
 		c.Fill(x+3, row, w-6, 1, ' ', fg, bg)
-		c.Text(x+4, row, "\U0000F013", icon, bg)
-		c.Text(x+6, row, label, fg, bg)
+		labelX := x + 4
+		if glyph := a.icon("authentication", "backend"); glyph != "" {
+			c.Text(labelX, row, glyph, icon, bg)
+			labelX += 2
+		}
+		c.Text(labelX, row, label, fg, bg)
 	}
 	authHints(c, y+h-2, joinConfiguredHints(
 		a.configuredMoveHint("backend_picker", false),
@@ -629,25 +634,25 @@ func (a *App) authRender(c *Canvas) {
 	if connectionLost {
 		iconColor = CRed
 	}
-	serverIcon := websiteFieldOption.Icon
-	if s.LocalMode {
-		serverIcon = "\U000F0379"
+	serverIcon := a.icon("authentication", "server")
+	leftLabelX := 2
+	if serverIcon != "" {
+		c.Text(leftLabelX, 1, serverIcon, iconColor, CDefault)
+		leftLabelX += 2
 	}
-	c.Text(2, 1, serverIcon, iconColor, CDefault)
 	serverDomain := "bitwarden.com"
 	if s.Server == "eu" {
 		serverDomain = "bitwarden.eu"
 	}
 	label := strings.ToUpper(s.Server) + " (" + serverDomain + ")"
 	rightLabel := "AES-256-GCM / " + s.CLI.Cipher.Backend()
+	rightIcon := a.icon("authentication", "encryption")
 	if s.LocalMode {
-		rightLabel = "\U000F01DA"
-		if s.LocalReplicaCreated != "" {
-			rightLabel += " " + s.LocalReplicaCreated
-		}
+		rightIcon = a.icon("authentication", "local_vault")
+		rightLabel = s.LocalReplicaCreated
 	}
 	rightWidth := utf8.RuneCountInString(rightLabel)
-	if !s.LocalMode {
+	if rightIcon != "" {
 		rightWidth += 2 // icon and separating space
 	}
 	rightX := c.W - 2 - rightWidth
@@ -658,32 +663,34 @@ func (a *App) authRender(c *Canvas) {
 			algorithm = "unknown"
 		}
 		full := "Local (" + path + ") " + algorithm
-		if 4+utf8.RuneCountInString(full)+2 < rightX {
-			c.Text(4, 1, full, CWhite, CDefault)
+		if leftLabelX+utf8.RuneCountInString(full)+2 < rightX {
+			c.Text(leftLabelX, 1, full, CWhite, CDefault)
 		} else {
-			c.Text(4, 1, "Local", CWhite, CDefault)
+			c.Text(leftLabelX, 1, "Local", CWhite, CDefault)
 			second := "(" + path + ") " + algorithm
-			if 4+utf8.RuneCountInString(second) < c.W-2 {
-				c.Text(4, 2, second, CWhite, CDefault)
+			if leftLabelX+utf8.RuneCountInString(second) < c.W-2 {
+				c.Text(leftLabelX, 2, second, CWhite, CDefault)
 			} else {
-				c.Text(4, 2, minWidth("("+path+")", c.W-6), CWhite, CDefault)
-				c.Text(4, 3, algorithm, CWhite, CDefault)
+				c.Text(leftLabelX, 2, minWidth("("+path+")", c.W-leftLabelX-2), CWhite, CDefault)
+				c.Text(leftLabelX, 3, algorithm, CWhite, CDefault)
 			}
 		}
 	} else {
-		c.Text(4, 1, label, CWhite, CDefault)
-		c.Text(2, 2, "\U0000F013", CBlue, CDefault)
-		c.Text(4, 2, string(s.Backend), CWhite, CDefault)
+		c.Text(leftLabelX, 1, label, CWhite, CDefault)
+		backendX := 2
+		if backendIcon := a.icon("authentication", "backend"); backendIcon != "" {
+			c.Text(backendX, 2, backendIcon, CBlue, CDefault)
+			backendX += 2
+		}
+		c.Text(backendX, 2, string(s.Backend), CWhite, CDefault)
 	}
 	if rightX > 4+len("Local")+2 && (s.LocalMode || rightX > 4+len(label)+2) {
-		if s.LocalMode {
-			c.Text(rightX, 1, "\U000F01DA", CBlue, CDefault)
-			if s.LocalReplicaCreated != "" {
-				c.Text(rightX+2, 1, s.LocalReplicaCreated, CWhite, CDefault)
-			}
-		} else {
-			c.Text(rightX, 1, "\U000F0780", CBlue, CDefault)
-			c.Text(rightX+2, 1, rightLabel, CWhite, CDefault)
+		if rightIcon != "" {
+			c.Text(rightX, 1, rightIcon, CBlue, CDefault)
+			rightX += 2
+		}
+		if rightLabel != "" {
+			c.Text(rightX, 1, rightLabel, CWhite, CDefault)
 		}
 	}
 
@@ -1120,17 +1127,17 @@ func (a *App) createRender(c *Canvas) {
 		icons := make([]string, 0)
 		for _, typeID := range vault.Schema().CreationOrder {
 			types = append(types, vault.TypeNames[typeID])
-			icons = append(icons, vault.TypeIcons[typeID])
+			icons = append(icons, a.itemIcon(typeID))
 		}
 		types = append(types, "Cancel")
-		icons = append(icons, "\U000F073A")
+		icons = append(icons, a.icon("dialogs", "cancel"))
 		selected := s.NewType
 		if s.Mode == DialogLinkedChoice {
 			types = nil
 			icons = nil
 			for _, target := range vault.Schema().LinkedTargets {
 				types = append(types, target.Name)
-				icons = append(icons, "\U000F0339")
+				icons = append(icons, a.icon("dialogs", "linked_field"))
 			}
 			selected = s.LinkedIndex
 		}
@@ -1162,19 +1169,19 @@ func (a *App) createRender(c *Canvas) {
 			icons = make([]string, 0, len(options)+1)
 			for _, option := range options {
 				types = append(types, option.Name)
-				icons = append(icons, option.Icon)
+				icons = append(icons, a.fieldIcon(option))
 			}
 			types = append(types, "Cancel")
-			icons = append(icons, "\U000F073A")
+			icons = append(icons, a.icon("dialogs", "cancel"))
 			selected = s.CustomType
 		} else if s.Mode == DialogWebsite {
 			types = append([]string(nil), s.CurrentField().Values...)
 			icons = make([]string, 0, len(types)+1)
 			for range types {
-				icons = append(icons, websiteFieldOption.Icon)
+				icons = append(icons, a.icon("contents", "web"))
 			}
 			types = append(types, "Cancel")
-			icons = append(icons, "\U000F073A")
+			icons = append(icons, a.icon("dialogs", "cancel"))
 			selected = s.WebsiteIndex
 		}
 		first := 0
@@ -1206,8 +1213,12 @@ func (a *App) createRender(c *Canvas) {
 			if idx == len(types)-1 && (s.Mode == DialogCreate || s.Mode == DialogFieldType || s.Mode == DialogWebsite) {
 				iconFG = fg
 			}
-			c.Text(x+5, ry, icons[idx], iconFG, bg)
-			c.Text(x+8, ry, minWidth(name, max(0, w-11)), fg, bg)
+			nameX := x + 5
+			if icons[idx] != "" {
+				c.Text(nameX, ry, icons[idx], iconFG, bg)
+				nameX += 3
+			}
+			c.Text(nameX, ry, minWidth(name, max(0, x+w-nameX-3)), fg, bg)
 		}
 
 	} else {
@@ -1391,11 +1402,11 @@ func (a *App) quitResult(err error) error {
 func (a *App) confirm(title, question string, changes []*vault.Change, save, quit bool, action func(bool)) {
 	p := &Popup{Title: title, Question: question, Save: save, Destructive: !save, Quit: quit, Yes: save, Action: action}
 	for _, ch := range changes {
-		icon := vault.IconFolder
+		icon := a.icon("items", "folder")
 		if ch.Entity == "item" {
 			for typ, name := range vault.TypeNames {
 				if name == ch.TypeName {
-					icon = vault.TypeIcons[typ]
+					icon = a.itemIcon(typ)
 					break
 				}
 			}
@@ -1419,11 +1430,11 @@ func (a *App) showRemoteReviewWithContext(
 		RemoteChoice: 2, RemoteFromRegistration: registrationBlocked,
 	}
 	for _, change := range review.Differences {
-		icon := vault.IconFolder
+		icon := a.icon("items", "folder")
 		if change.Entity == "item" {
 			for typ, name := range vault.TypeNames {
 				if name == change.TypeName {
-					icon = vault.TypeIcons[typ]
+					icon = a.itemIcon(typ)
 					break
 				}
 			}
