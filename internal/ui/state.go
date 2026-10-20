@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
+
 )
 
 type Screen int
@@ -118,6 +118,9 @@ type State struct {
 	Revealed                           map[string]bool
 	Input                              string
 	Caret                              int
+	InputWrap                          bool
+	SelectionAnchor                    int
+	editUndo, editRedo                 []editorSnapshot
 	InputSecret                        bool
 	AuthID, AuthSecret, Master         string
 	ClientUnauthenticated              bool
@@ -176,7 +179,7 @@ func NewState(cfg config.Config, cli *bitwarden.Client) *State {
 	if len(cfg.Authentication.BackendMode) > 0 {
 		backend = bitwarden.BackendMode(cfg.Authentication.BackendMode[0])
 	}
-	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), Backend: backend, CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, 0, 0}}
+	return &State{Config: cfg, ServerConnected: true, Server: config.NormalizeServer(cfg.Authentication.DefaultServer), Backend: backend, CLI: cli, Screen: AuthChecking, Busy: true, BusyMessage: "Checking Bitwarden session", Stage: vault.NewStage(), Focus: PaneItems, Originals: map[string]map[string]any{}, FolderOriginals: map[string]map[string]any{}, Revealed: map[string]bool{}, SelectionAnchor: -1, InputSecret: true, FilterVault: 1, FilterFolder: -1, Filters: [4]int{1, 0, 0, 0}}
 }
 
 // ProtectMaster encrypts the editing buffer between keystrokes in the live UI.
@@ -511,11 +514,13 @@ func (s *State) BeginTextEdit() error {
 		return err
 	}
 	s.Input = v
-	s.Caret = utf8.RuneCountInString(v)
+	s.Caret = 0
+	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditorOriginal = v
 	s.EditPath = append([]any(nil), f.Path...)
 	s.Mode = Edit
 	s.Focus = PaneDetail
+	s.InputWrap = false
 	s.InputSecret = f.Hidden
 	// Content and Details share the visibility of this specific hidden field.
 	s.AuthVisible = f.Hidden && s.Revealed[s.RevealKey()]
@@ -545,17 +550,19 @@ func (s *State) BeginEditWebsite(index int) error {
 		return err
 	}
 	s.Input, s.EditorOriginal = value, value
-	s.Caret = utf8.RuneCountInString(value)
+	s.Caret = 0
+	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = path, false
-	s.Mode, s.Focus, s.InputSecret = Edit, PaneDetail, false
+	s.Mode, s.Focus, s.InputWrap, s.InputSecret = Edit, PaneDetail, false, false
 	return nil
 }
 
 // BeginNewWebsite opens a blank editor without adding an empty URI to the vault.
 func (s *State) BeginNewWebsite() {
 	s.Input, s.EditorOriginal, s.Caret = "", "", 0
+	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = nil, true
-	s.InputSecret, s.Mode, s.Focus = false, Edit, PaneDetail
+	s.InputWrap, s.InputSecret, s.Mode, s.Focus = false, false, Edit, PaneDetail
 }
 
 func (s *State) CommitEdit() error {
@@ -654,6 +661,8 @@ func (s *State) ExitEdit() {
 	s.Focus = PaneContent
 	s.Input = ""
 	s.EditorOriginal = ""
+	s.InputWrap = false
+	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.InputSecret = false
 	s.AuthVisible = false // Never carry editor visibility into authentication.
 	s.EditPath = nil
@@ -844,34 +853,168 @@ func (s *State) FieldStatus(f vault.Field) vault.Kind {
 	}
 	return s.Stage.FieldKind(it.ID(), f.Path, s.CLI.Cipher)
 }
+type editorSnapshot struct{ input string; caret, anchor int }
+
+func (s *State) recordEdit() {
+	if s.Mode == Edit {
+		s.editUndo = append(s.editUndo, editorSnapshot{s.Input, s.Caret, s.SelectionAnchor})
+		s.editRedo = nil
+	}
+}
+func (s *State) selection() (int, int, bool) {
+	if s.SelectionAnchor < 0 || s.SelectionAnchor == s.Caret { return 0, 0, false }
+	return min(s.SelectionAnchor, s.Caret), max(s.SelectionAnchor, s.Caret), true
+}
+func (s *State) deleteSelection() bool {
+	start, end, ok := s.selection()
+	if !ok { return false }
+	r := []rune(s.Input)
+	s.Input, s.Caret, s.SelectionAnchor = string(append(r[:start], r[end:]...)), start, -1
+	return true
+}
+func (s *State) moveCaret(caret int, selectText bool) {
+	caret = max(0, min(len([]rune(s.Input)), caret))
+	if selectText {
+		if s.SelectionAnchor < 0 { s.SelectionAnchor = s.Caret }
+	} else { s.SelectionAnchor = -1 }
+	s.Caret = caret
+}
 func (s *State) Insert(r rune) {
+	s.recordEdit()
+	s.deleteSelection()
 	text := []rune(s.Input)
-	if s.Caret < 0 {
-		s.Caret = 0
-	}
-	if s.Caret > len(text) {
-		s.Caret = len(text)
-	}
+	s.Caret = max(0, min(s.Caret, len(text)))
 	text = append(text[:s.Caret], append([]rune{r}, text[s.Caret:]...)...)
-	s.Input = string(text)
-	s.Caret++
+	s.Input, s.Caret, s.SelectionAnchor = string(text), s.Caret+1, -1
+}
+func (s *State) InsertText(text string) {
+	if text == "" { return }
+	s.recordEdit(); s.deleteSelection()
+	r := []rune(s.Input); added := []rune(text)
+	r = append(r[:s.Caret], append(added, r[s.Caret:]...)...)
+	s.Input, s.Caret, s.SelectionAnchor = string(r), s.Caret+len(added), -1
 }
 func (s *State) Backspace() {
+	s.recordEdit()
+	if s.deleteSelection() { return }
 	r := []rune(s.Input)
-	if s.Caret > 0 && s.Caret <= len(r) {
-		r = append(r[:s.Caret-1], r[s.Caret:]...)
-		s.Input = string(r)
+	if s.Caret > 0 && s.Caret <= len(r) { s.Input, s.Caret = string(append(r[:s.Caret-1], r[s.Caret:]...)), s.Caret-1 }
+}
+func (s *State) DeleteForward() {
+	s.recordEdit()
+	if s.deleteSelection() { return }
+	r := []rune(s.Input)
+	if s.Caret >= 0 && s.Caret < len(r) { s.Input = string(append(r[:s.Caret], r[s.Caret+1:]...)) }
+}
+func (s *State) Cursor(delta int) { s.moveCaret(s.Caret+delta, false) }
+func (s *State) CursorSelect(delta int) { s.moveCaret(s.Caret+delta, true) }
+func (s *State) UndoEdit() {
+	if len(s.editUndo) == 0 { return }
+	s.editRedo = append(s.editRedo, editorSnapshot{s.Input, s.Caret, s.SelectionAnchor})
+	v := s.editUndo[len(s.editUndo)-1]; s.editUndo = s.editUndo[:len(s.editUndo)-1]
+	s.Input, s.Caret, s.SelectionAnchor = v.input, v.caret, v.anchor
+}
+func (s *State) RedoEdit() {
+	if len(s.editRedo) == 0 { return }
+	s.editUndo = append(s.editUndo, editorSnapshot{s.Input, s.Caret, s.SelectionAnchor})
+	v := s.editRedo[len(s.editRedo)-1]; s.editRedo = s.editRedo[:len(s.editRedo)-1]
+	s.Input, s.Caret, s.SelectionAnchor = v.input, v.caret, v.anchor
+}
+
+// CursorLine moves between explicit newline-delimited lines, retaining the
+// current column whenever the destination line is long enough.
+func (s *State) CursorLine(direction int) {
+	text := []rune(s.Input)
+	caret := max(0, min(s.Caret, len(text)))
+	lineStart := caret
+	for lineStart > 0 && text[lineStart-1] != '\n' {
+		lineStart--
+	}
+	column := caret - lineStart
+	if direction < 0 {
+		if lineStart == 0 {
+			return
+		}
+		end := lineStart - 1
+		start := end
+		for start > 0 && text[start-1] != '\n' {
+			start--
+		}
+		s.moveCaret(min(start+column, end), false)
+		return
+	}
+	lineEnd := caret
+	for lineEnd < len(text) && text[lineEnd] != '\n' {
+		lineEnd++
+	}
+	if direction > 0 && lineEnd < len(text) {
+		start := lineEnd + 1
+		end := start
+		for end < len(text) && text[end] != '\n' {
+			end++
+		}
+		s.moveCaret(min(start+column, end), false)
+	}
+}
+
+// CursorLineBoundary moves to the start or end of the current paragraph.
+func (s *State) CursorLineBoundary(end bool) {
+	text := []rune(s.Input)
+	s.Caret = max(0, min(s.Caret, len(text)))
+	if end {
+		for s.Caret < len(text) && text[s.Caret] != '\n' {
+			s.Caret++
+		}
+		return
+	}
+	for s.Caret > 0 && text[s.Caret-1] != '\n' {
 		s.Caret--
 	}
 }
-func (s *State) DeleteForward() {
-	r := []rune(s.Input)
-	if s.Caret >= 0 && s.Caret < len(r) {
-		r = append(r[:s.Caret], r[s.Caret+1:]...)
-		s.Input = string(r)
-	}
+
+func (s *State) CursorSelectLine(direction int) {
+	anchor := s.SelectionAnchor
+	if anchor < 0 { anchor = s.Caret }
+	s.CursorLine(direction)
+	s.SelectionAnchor = anchor
 }
-func (s *State) Cursor(delta int) { s.Caret = max(0, min(len([]rune(s.Input)), s.Caret+delta)) }
+
+// CursorBlankLine moves to the nearest blank line, or to the corresponding
+// document boundary when no blank line exists in that direction. When selectText
+// is true, it extends the active selection instead of clearing it.
+func (s *State) CursorBlankLine(direction int, selectText bool) {
+	r := []rune(s.Input)
+	starts := []int{0}
+	for i, char := range r {
+		if char == '\n' { starts = append(starts, i+1) }
+	}
+	current := 0
+	for i, start := range starts {
+		if start > s.Caret { break }
+		current = i
+	}
+	if selectText {
+		if s.SelectionAnchor < 0 { s.SelectionAnchor = s.Caret }
+	} else {
+		s.SelectionAnchor = -1
+	}
+	blank := func(i int) bool {
+		end := len(r)
+		if i+1 < len(starts) { end = starts[i+1] - 1 }
+		return starts[i] == end
+	}
+	if direction < 0 {
+		for i := current - 1; i >= 0; i-- {
+			if blank(i) { s.Caret = starts[i]; return }
+		}
+		s.Caret = 0
+		return
+	}
+	for i := current + 1; i < len(starts); i++ {
+		if blank(i) { s.Caret = starts[i]; return }
+	}
+	s.Caret = len(r)
+}
 
 // WordBoundary returns the next word boundary using Unicode space/punctuation.
 // A word includes letters, marks, digits and underscores.
@@ -903,6 +1046,8 @@ func (s *State) WordCursor(direction int) {
 	s.Caret = WordBoundary(s.Input, s.Caret, direction)
 }
 func (s *State) DeleteWord(direction int) {
+	s.recordEdit()
+	if s.deleteSelection() { return }
 	rs := []rune(s.Input)
 	start := max(0, min(len(rs), s.Caret))
 	end := WordBoundary(s.Input, start, direction)

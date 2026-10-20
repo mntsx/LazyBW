@@ -111,6 +111,77 @@ func TestWordEditsAndDeleteForwardUseActiveTextbox(t *testing.T) {
 }
 
 // TestBoldAndDimOutputPreservesAttributes validates gocui's ANSI SGR order.
+func TestMultilineEditorCursorAndViewport(t *testing.T) {
+	s := setup(t)
+	s.Input = "short\n0123456789\nthird"
+	s.Caret = len([]rune("short\n012345"))
+	s.CursorLine(-1)
+	if s.Caret != 5 {
+		t.Fatalf("up moved caret to %d, want 5", s.Caret)
+	}
+	s.CursorLine(1)
+	if s.Caret != len([]rune("short\n01234")) {
+		t.Fatalf("down moved caret to %d", s.Caret)
+	}
+	s.CursorLineBoundary(true)
+	if s.Caret != len([]rune("short\n0123456789")) {
+		t.Fatalf("end of paragraph = %d", s.Caret)
+	}
+	s.CursorLineBoundary(false)
+	if s.Caret != len([]rune("short\n")) {
+		t.Fatalf("start of paragraph = %d", s.Caret)
+	}
+
+	rows, line, col := detailDisplayLines(s.Input, len([]rune("short\n012345678")), 4, false)
+	if line != 1 || col != 3 || rows[0] != "" || rows[1] != "6789" || rows[2] != "" {
+		t.Fatalf("unwrapped viewport = %#v @ %d,%d", rows, line, col)
+	}
+	rows, line, col = detailDisplayLines(s.Input, len([]rune("short\n012345678")), 4, true)
+	if line != 4 || col != 1 || rows[0] != "shor" || rows[1] != "t" || rows[2] != "0123" || rows[3] != "4567" {
+		t.Fatalf("wrapped viewport = %#v @ %d,%d", rows, line, col)
+	}
+}
+
+func TestEditorSelectionHistoryAndBlankLineNavigation(t *testing.T) {
+	s := setup(t)
+	s.Mode, s.Input, s.Caret, s.SelectionAnchor = Edit, "one\n\ntwo", 0, -1
+	s.CursorSelect(3)
+	if start, end, ok := s.selection(); !ok || start != 0 || end != 3 {
+		t.Fatalf("character selection = %d:%d, %v", start, end, ok)
+	}
+	s.InsertText("ONE")
+	if s.Input != "ONE\n\ntwo" { t.Fatalf("selection replacement = %q", s.Input) }
+	s.UndoEdit()
+	if s.Input != "one\n\ntwo" || s.Caret != 3 || s.SelectionAnchor != 0 {
+		t.Fatalf("undo did not restore selection: %q @%d/%d", s.Input, s.Caret, s.SelectionAnchor)
+	}
+	s.RedoEdit()
+	if s.Input != "ONE\n\ntwo" { t.Fatalf("redo = %q", s.Input) }
+	s.Caret, s.SelectionAnchor = 0, -1
+	s.CursorBlankLine(1, true)
+	if s.Caret != 4 || s.SelectionAnchor != 0 {
+		t.Fatalf("next blank line = %d/%d", s.Caret, s.SelectionAnchor)
+	}
+	s.CursorBlankLine(1, true)
+	if s.Caret != len([]rune(s.Input)) { t.Fatalf("missing blank line must go to end: %d", s.Caret) }
+}
+
+func TestDetailWrapHintAndDefault(t *testing.T) {
+	s := setup(t)
+	s.OpenItem()
+	if err := s.BeginEdit(); err != nil {
+		t.Fatal(err)
+	}
+	a := New(s)
+	if s.InputWrap || !strings.Contains(strings.Join(a.hints(), " "), "ctrl+w wrap") {
+		t.Fatalf("detail editor must default to unwrapped: wrap=%v hints=%v", s.InputWrap, a.hints())
+	}
+	s.InputWrap = true
+	if !strings.Contains(strings.Join(a.hints(), " "), "ctrl+w unwrap") {
+		t.Fatalf("wrapped detail editor must advertise unwrap: %v", a.hints())
+	}
+}
+
 func TestBoldAndDimOutputPreservesAttributes(t *testing.T) {
 	c := NewCanvas(20, 1)
 	c.TextBold(0, 0, "Title", CWhite, CBlack)

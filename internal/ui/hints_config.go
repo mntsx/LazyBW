@@ -221,6 +221,16 @@ func configuredHintAction(section, label string) string {
 		return "reveal"
 	case "ctrl+ENTER newline":
 		return "newline"
+	case "ctrl+w wrap", "ctrl+w unwrap":
+		return "wrap"
+	case "ctrl+z undo":
+		return "undo"
+	case "ctrl+y redo":
+		return "redo"
+	case "ctrl+c copy":
+		return "copy"
+	case "ctrl+v paste":
+		return "paste"
 	case "s push":
 		return "save"
 	case "d discard":

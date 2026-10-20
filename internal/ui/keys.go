@@ -63,6 +63,11 @@ func (a *App) bind(g *gocui.Gui) error {
 		{gocui.KeyCtrlD, "ctrl+d", nil},
 		{gocui.KeyCtrlR, "ctrl+r", nil},
 		{gocui.KeyCtrlB, "ctrl+b", nil},
+		{gocui.KeyCtrlZ, "ctrl+z", textOnly(func() error { if a.S.Mode == Edit { a.S.UndoEdit() }; return nil })},
+		{gocui.KeyCtrlY, "ctrl+y", textOnly(func() error { if a.S.Mode == Edit { a.S.RedoEdit() }; return nil })},
+		{gocui.KeyCtrlC, "ctrl+c", textOnly(a.copyEditorSelection)},
+		{gocui.KeyCtrlV, "ctrl+v", textOnly(a.pasteEditorText)},
+		{gocui.KeyCtrlN, "ctrl+n", textOnly(func() error { a.nextHintPage(); return nil })},
 	}
 	for _, entry := range bindings {
 		spec := entry
@@ -99,6 +104,77 @@ func (a *App) bind(g *gocui.Gui) error {
 		return g.SetKeybinding("", key, mod, fn)
 	}); err != nil {
 		return err
+	}
+	for _, native := range a.nativeWordKeys {
+		if native.Action != terminalkeys.PreviousBlankLine && native.Action != terminalkeys.NextBlankLine {
+			continue
+		}
+		spec := native
+		if err := g.SetKeybinding("", gocui.Key(spec.Key), gocui.ModNone,
+			func(_ *gocui.Gui, _ *gocui.View) error {
+				return a.handleKey(spec.Label, func() error {
+					if a.S.Mode == Edit {
+						direction := 1
+						if spec.Action == terminalkeys.PreviousBlankLine { direction = -1 }
+						a.S.CursorBlankLine(direction, spec.Select)
+					}
+					return nil
+				})
+			}); err != nil { return err }
+	}
+	for _, binding := range []struct {
+		key       gocui.Key
+		label     string
+		toEnd     bool
+	}{
+		{gocui.KeyArrowUp, "ctrl+↑", false},
+		{gocui.KeyArrowDown, "ctrl+↓", true},
+	} {
+		spec := binding
+		if err := g.SetKeybinding("", spec.key, gocui.ModMouseCtrl,
+			func(_ *gocui.Gui, _ *gocui.View) error {
+				return a.handleKey(spec.label, func() error {
+					if a.S.Mode == Edit {
+						direction := -1
+						if spec.toEnd { direction = 1 }
+						a.S.CursorBlankLine(direction, false)
+					}
+					return nil
+				})
+			}); err != nil {
+			return err
+		}
+	}
+	for _, binding := range []struct {
+		key       gocui.Key
+		direction int
+	}{
+		{gocui.KeyArrowLeft, -1}, {gocui.KeyArrowRight, 1},
+		{gocui.KeyArrowUp, -1}, {gocui.KeyArrowDown, 1},
+	} {
+		spec := binding
+		if err := g.SetKeybinding("", spec.key, gocui.ModShift,
+			func(_ *gocui.Gui, _ *gocui.View) error {
+				return a.handleKey("shift", func() error {
+					if a.S.Mode != Edit { return nil }
+					if spec.key == gocui.KeyArrowLeft || spec.key == gocui.KeyArrowRight {
+						a.S.CursorSelect(spec.direction)
+					} else if strings.Contains(a.S.Input, "\n") {
+						a.S.CursorSelectLine(spec.direction)
+					}
+					return nil
+				})
+			}); err != nil { return err }
+		if err := g.SetKeybinding("", spec.key, gocui.ModMouseCtrl|gocui.ModShift,
+			func(_ *gocui.Gui, _ *gocui.View) error {
+				return a.handleKey("ctrl+shift", func() error {
+					if a.S.Mode != Edit { return nil }
+					if spec.key == gocui.KeyArrowLeft || spec.key == gocui.KeyArrowRight {
+						a.S.moveCaret(WordBoundary(a.S.Input, a.S.Caret, spec.direction), true)
+					} else { a.S.CursorBlankLine(spec.direction, true) }
+					return nil
+				})
+			}); err != nil { return err }
 	}
 	return a.bindAliases(g)
 }
@@ -363,12 +439,7 @@ func (a *App) char(r rune) error {
 	}
 	switch r {
 	case '?':
-		width := 90
-		if a.gui != nil {
-			width = max(18, 3*a.width()/4)
-		}
-		pages := PaginateHints(a.hints(), width)
-		s.HintPage = (s.HintPage + 1) % len(pages)
+		a.nextHintPage()
 	case '1', '2', '3', '4', '5', '6', '7':
 		pane := paneForNumber(s, int(r-'0'))
 		if pane == 0 {
@@ -573,6 +644,15 @@ func (a *App) setAuthValue(v string) {
 }
 
 // deleteForward removes the next character from any active text input.
+func (a *App) nextHintPage() {
+	width := 90
+	if a.gui != nil {
+		width = max(18, 3*a.width()/4)
+	}
+	pages := PaginateHints(a.hints(), width)
+	a.S.HintPage = (a.S.HintPage + 1) % len(pages)
+}
+
 func (a *App) deleteForward() error {
 	s := a.S
 	if s.Popup != nil || (s.Mode == DialogServer || s.Mode == DialogBackend) || s.Screen == AuthChecking {
@@ -836,6 +916,10 @@ func (a *App) arrow(vertical, horizontal int) error {
 				}
 				return nil
 			}
+		}
+		if s.Mode == Edit && vertical != 0 && strings.Contains(s.Input, "\n") {
+			s.CursorLine(vertical)
+			return nil
 		}
 		if horizontal != 0 {
 			s.Cursor(horizontal)

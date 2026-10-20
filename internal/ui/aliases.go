@@ -98,6 +98,7 @@ func (a *App) bindAliases(g *gocui.Gui) error {
 		"delete": true, "home": true, "end": true, "tab": true,
 		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
 		"ctrl+r": true, "ctrl+b": true, "ctrl+j": true, "ctrl+enter": true, "ctrl+w": true,
+		"ctrl+z": true, "ctrl+y": true, "ctrl+c": true, "ctrl+v": true,
 	}
 	for name := range a.configuredBindings() {
 		if native[name] {
@@ -309,6 +310,9 @@ func (a *App) configuredShortcut(section, action string) func() error {
 	case "delete", "delete_field", "discard":
 		return func() error { return a.char('d') }
 	case "copy":
+		if section == "detail" {
+			return a.copyEditorSelection
+		}
 		return func() error { return a.char('c') }
 	case "reveal":
 		return func() error { return a.char('r') }
@@ -318,6 +322,14 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { return a.char('f') }
 	case "newline":
 		return func() error { a.S.Insert('\n'); return nil }
+	case "wrap":
+		return func() error { a.S.InputWrap = !a.S.InputWrap; return nil }
+	case "undo":
+		return func() error { a.S.UndoEdit(); return nil }
+	case "redo":
+		return func() error { a.S.RedoEdit(); return nil }
+	case "paste":
+		return a.pasteEditorText
 	}
 	focus := map[string]Pane{
 		"focus_my_vault": PaneVault, "focus_item_types": PaneTypes,
@@ -464,6 +476,8 @@ func aliasActionName(section, action string) string {
 		return "next page"
 	case "newline":
 		return "newline"
+	case "wrap", "undo", "redo", "paste":
+		return action
 	case "switch", "copy", "edit", "quit":
 		return action
 	}

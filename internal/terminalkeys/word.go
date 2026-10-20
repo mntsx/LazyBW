@@ -16,6 +16,8 @@ const (
 	PreviousWord Action = iota + 1
 	NextWord
 	DeleteNextWord
+	PreviousBlankLine
+	NextBlankLine
 )
 
 // Binding associates a terminal-decoded key with an editing operation.
@@ -23,6 +25,7 @@ type Binding struct {
 	Key    tcell.Key
 	Action Action
 	Label  string
+	Select bool
 }
 
 // Register makes Ctrl+Left, Ctrl+Right and Ctrl+Delete distinguishable even
@@ -50,9 +53,17 @@ func registerWordSequences(info *terminfo.Terminfo) []Binding {
 	info.KeyF52 = "\x1b[1;5D"
 	info.KeyF53 = "\x1b[1;5C"
 	info.KeyF54 = "\x1b[3;5~"
+	info.KeyF55 = "\x1b[1;6A"
+	info.KeyF56 = "\x1b[1;6B"
+	info.KeyF57 = "\x1b[1;5A"
+	info.KeyF58 = "\x1b[1;5B"
 	return []Binding{
 		{Key: tcell.KeyF52, Action: PreviousWord, Label: "ctrl+←"},
 		{Key: tcell.KeyF53, Action: NextWord, Label: "ctrl+→"},
 		{Key: tcell.KeyF54, Action: DeleteNextWord, Label: "ctrl+delete"},
+		{Key: tcell.KeyF55, Action: PreviousBlankLine, Label: "ctrl+shift+↑", Select: true},
+		{Key: tcell.KeyF56, Action: NextBlankLine, Label: "ctrl+shift+↓", Select: true},
+		{Key: tcell.KeyF57, Action: PreviousBlankLine, Label: "ctrl+↑"},
+		{Key: tcell.KeyF58, Action: NextBlankLine, Label: "ctrl+↓"},
 	}
 }

@@ -199,6 +199,8 @@ var DefaultKeybinds = map[string]map[string][]string{
 	"detail": {
 		"back": {"escape"}, "save": {"enter"},
 		"newline": {"ctrl+enter"}, "reveal": {"ctrl+r"},
+		"wrap": {"ctrl+w"}, "undo": {"ctrl+z"}, "redo": {"ctrl+y"},
+		"copy": {"ctrl+c"}, "paste": {"ctrl+v"},
 	},
 	"popup": {
 		"cancel": {"escape"}, "next": {"down"},

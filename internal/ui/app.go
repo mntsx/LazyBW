@@ -1873,6 +1873,59 @@ func (a *App) confirmStage(save, all bool) {
 		}
 	})
 }
+func (a *App) copyEditorSelection() error {
+	if a.S.Mode != Edit {
+		return nil
+	}
+	start, end, ok := a.S.selection()
+	if !ok {
+		return nil
+	}
+	return a.clipboard(string([]rune(a.S.Input)[start:end]))
+}
+
+func (a *App) pasteEditorText() error {
+	if a.S.Mode != Edit {
+		return nil
+	}
+	value, err := a.clipboardText()
+	if err != nil {
+		return err
+	}
+	a.S.InsertText(value)
+	return nil
+}
+
+func (a *App) clipboardText() (string, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("powershell.exe", "-NoProfile", "-Command", "Get-Clipboard -Raw")
+	default:
+		if _, err := exec.LookPath("wl-paste"); err == nil {
+			cmd = exec.Command("wl-paste", "--no-newline")
+		} else if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
+		} else {
+			return "", fmt.Errorf("clipboard tool unavailable")
+		}
+	}
+	value, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("clipboard unavailable")
+	}
+	// Some clipboard bridges lazily initialize their selection on the first
+	// query. Retry an empty read so the first Ctrl+V behaves like later ones.
+	if len(value) == 0 {
+		cmd = exec.Command(cmd.Path, cmd.Args[1:]...)
+		value, err = cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("clipboard unavailable")
+		}
+	}
+	return string(value), nil
+}
+
 func (a *App) clipboard(value string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

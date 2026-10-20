@@ -38,6 +38,16 @@ func keyLabel(key interface{}) string {
 		return "ctrl+enter"
 	case gocui.KeyCtrlW:
 		return "ctrl+w"
+	case gocui.KeyCtrlZ:
+		return "ctrl+z"
+	case gocui.KeyCtrlY:
+		return "ctrl+y"
+	case gocui.KeyCtrlC:
+		return "ctrl+c"
+	case gocui.KeyCtrlV:
+		return "ctrl+v"
+	case gocui.KeyCtrlN:
+		return "ctrl+n"
 	case gocui.KeyBackspace, gocui.KeyBackspace2:
 		return "backspace"
 	case gocui.KeyDelete:

@@ -92,7 +92,7 @@ func TestDetailEditorPreservesNumericInput(t *testing.T) {
 	if err := a.char('7'); err != nil {
 		t.Fatal(err)
 	}
-	if s.Focus != PaneDetail || s.Mode != Edit || s.Input != start+"7" {
+	if s.Focus != PaneDetail || s.Mode != Edit || s.Input != "7"+start {
 		t.Fatal("typing digit 7 in Details should not leave the editor")
 	}
 	h := strings.Join(a.hints(), " | ")
@@ -163,7 +163,7 @@ func TestDetailCannotNavigateByDigits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if s.Focus != PaneDetail || s.Mode != Edit || s.Input != old+"1234567" {
+	if s.Focus != PaneDetail || s.Mode != Edit || s.Input != "1234567"+old {
 		t.Fatal("number keys must only type into the editor")
 	}
 }

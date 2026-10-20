@@ -1044,26 +1044,19 @@ func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 	if s.InputSecret && !s.AuthVisible {
 		value = strings.Repeat("•", utf8.RuneCountInString(s.Input))
 	}
-	lines := strings.Split(value, "\n")
-	cursorLine, cursorCol := 0, 0
-	for j, r := range []rune(value) {
-		if j >= s.Caret {
-			break
-		}
-		if r == '\n' {
-			cursorLine++
-			cursorCol = 0
-		} else {
-			cursorCol++
-		}
-	}
+	lines, cursorLine, _ := detailDisplayLines(value, s.Caret, w-4, s.InputWrap)
+	offsets := detailDisplayOffsets(value, s.Caret, w-4, s.InputWrap)
+	selectedStart, selectedEnd, selecting := s.selection()
 	startLine := max(0, cursorLine-(h-4))
 	for i := startLine; i < len(lines) && y+3+i-startLine < y+h; i++ {
-		line := lines[i]
-		if i == cursorLine {
-			line, _ = visibleText(line, cursorCol, w-4)
+		for column, char := range []rune(lines[i]) {
+			fg, bg := CWhite, CBlack
+			if selecting && i < len(offsets) && column < len(offsets[i]) &&
+				offsets[i][column] >= selectedStart && offsets[i][column] < selectedEnd {
+				fg, bg = CBlack, CYellow
+			}
+			c.Put(x+2+column, y+3+i-startLine, char, fg, bg)
 		}
-		c.Text(x+2, y+3+i-startLine, minWidth(line, w-4), CWhite, CBlack)
 	}
 	// The terminal's beam cursor is drawn over the text, not into it.
 }
@@ -1129,14 +1122,19 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 			color, CDefault)
 	} else {
 		pages := PaginateHints(a.hints(), limit)
-		page := pages[s.HintPage%len(pages)]
+		page := append([]string(nil), pages[s.HintPage%len(pages)]...)
+		if a.textEntryActive() {
+			for i, hint := range page {
+				if hint == "? ..." { page[i] = "ctrl+n ..." }
+			}
+		}
 		startX := x
 		off := 0
 		for _, hint := range page {
 			if off >= limit {
 				break
 			}
-			if hint == "? ..." {
+			if hint == "? ..." || hint == "ctrl+n ..." {
 				c.Text(startX+off, y, hint, CHintKey, CDefault)
 			} else {
 				parts := strings.SplitN(hint, " ", 2)
@@ -1312,7 +1310,13 @@ func (a *App) baseHints() []string {
 	case s.Mode == Find:
 		h = append(h, "ENTER apply", "esc back")
 	case s.Mode == Edit:
-		h = append(h, "ENTER apply", "esc cancel", "ctrl+ENTER newline")
+		h = append(h, "ENTER apply", "esc cancel")
+		if s.InputWrap {
+			h = append(h, "ctrl+w unwrap")
+		} else {
+			h = append(h, "ctrl+w wrap")
+		}
+		h = append(h, "ctrl+ENTER newline", "ctrl+z undo", "ctrl+y redo", "ctrl+c copy", "ctrl+v paste")
 		if s.InputSecret {
 			h = append(h, "ctrl+r reveal")
 		}
