@@ -567,14 +567,18 @@ func (a *App) authRender(c *Canvas) {
 		serverDomain = "bitwarden.eu"
 	}
 	label := strings.ToUpper(s.Server) + " (" + serverDomain + ")"
-	rightLabel := "cipher: AES-256-GCM / " + s.CLI.Cipher.Backend()
+	rightLabel := "AES-256-GCM / " + s.CLI.Cipher.Backend()
 	if s.LocalMode {
 		rightLabel = "\U000F01DA"
 		if s.LocalReplicaCreated != "" {
 			rightLabel += " " + s.LocalReplicaCreated
 		}
 	}
-	rightX := c.W - 2 - utf8.RuneCountInString(rightLabel)
+	rightWidth := utf8.RuneCountInString(rightLabel)
+	if !s.LocalMode {
+		rightWidth += 2 // icon and separating space
+	}
+	rightX := c.W - 2 - rightWidth
 	if s.LocalMode {
 		path := localvault.FilePath(s.Config.Local.VaultPath)
 		algorithm := s.LocalAlgorithm
@@ -604,7 +608,8 @@ func (a *App) authRender(c *Canvas) {
 				c.Text(rightX+2, 1, s.LocalReplicaCreated, CWhite, CDefault)
 			}
 		} else {
-			c.Text(rightX, 1, rightLabel, CWhite, CDefault)
+			c.Text(rightX, 1, "\U000F0780", CBlue, CDefault)
+			c.Text(rightX+2, 1, rightLabel, CWhite, CDefault)
 		}
 	}
 

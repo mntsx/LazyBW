@@ -6,18 +6,21 @@ import (
 	"time"
 )
 
-// TestCipherIndicatorUsesWhite checks both authentication screens' top labels.
-func TestCipherIndicatorUsesWhite(t *testing.T) {
+// TestCipherIndicatorUsesBlueIcon checks both authentication screens' top labels.
+func TestCipherIndicatorUsesBlueIcon(t *testing.T) {
 	s := setup(t)
 	a := New(s)
 	for _, screen := range []Screen{AuthClient, AuthMaster} {
 		s.Screen = screen
 		canvas := NewCanvas(145, 45)
 		a.authRender(canvas)
-		label := "cipher: AES-256-GCM / " + s.CLI.Cipher.Backend()
-		x := canvas.W - 2 - len([]rune(label))
-		if got := canvasAt(canvas, x, 1); got.FG != CWhite {
-			t.Fatalf("screen %d: cipher indicator is not white: %+v", screen, got)
+		label := "AES-256-GCM / " + s.CLI.Cipher.Backend()
+		x := canvas.W - 2 - len([]rune("\U000F0780 "+label))
+		if got := canvasAt(canvas, x, 1); got.R != '\U000F0780' || got.FG != CBlue {
+			t.Fatalf("screen %d: cipher icon is not blue: %+v", screen, got)
+		}
+		if got := canvasAt(canvas, x+2, 1); got.R != 'A' || got.FG != CWhite {
+			t.Fatalf("screen %d: cipher label is not white: %+v", screen, got)
 		}
 	}
 }

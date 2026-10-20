@@ -57,8 +57,9 @@ func TestAuthEncryptionIndicator(t *testing.T) {
 		c := NewCanvas(120, 42)
 		a.authRender(c)
 		row := stringCellRow(c, 1)
-		if !strings.Contains(row, "cipher: AES-256-GCM / "+s.CLI.Cipher.Backend()) {
-			t.Fatalf("%v: no cipher method label: %q", screen, row)
+		label := "AES-256-GCM / " + s.CLI.Cipher.Backend()
+		if !strings.Contains(row, "\U000F0780 "+label) || strings.Contains(row, "cipher:") {
+			t.Fatalf("%v: unexpected cipher method label: %q", screen, row)
 		}
 	}
 }
