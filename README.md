@@ -3,7 +3,7 @@
 > \[!NOTE]
 > LazyBW project and its contributors are not affiliated with, endorsed by, or sponsored by Bitwarden, Inc.
 
-LazyBW is a terminal user interface (TUI) for **Linux**, built on top of the official [Bitwarden CLI (`bw`)](https://bitwarden.com/help/cli/). It runs in UTF-8, ANSI-compatible terminals (TTY/PTY, including SSH sessions), with true-color and mouse support recommended. LazyBW provides a convenient, keyboard-driven way to browse, search, create, edit, and organize vault items without dealing directly with CLI commands. It also introduces a feature not supported by `bw`: **the ability to create encrypted, read-only local replicas of your personal vault**, allowing offline access without connecting to Bitwarden's servers. All other functionality relies on the existing capabilities of the official CLI.
+LazyBW is a terminal user interface (TUI) developed and supported for **Linux**, built on top of the official [Bitwarden CLI (`bw`)](https://bitwarden.com/help/cli/). It runs in UTF-8, ANSI-compatible terminals (TTY/PTY, including SSH sessions), with true-color and mouse support recommended. Use a monospaced font with Material Design Icons or Nerd Font glyph support so that icons render at their intended size and alignment. LazyBW provides a convenient, keyboard-driven way to browse, search, create, edit, and organize vault items without dealing directly with CLI commands. It also introduces a feature not supported by `bw`: **the ability to create encrypted, read-only local replicas of your personal vault**, allowing offline access without connecting to Bitwarden's servers. All other functionality relies on the existing capabilities of the official CLI.
 
 <!--
 **Snap installation**:
@@ -26,11 +26,13 @@ sudo apt install lazybw
 **Installation**:
 
 ```bash
-git clone git@github.com:mntsx/LazyBW.git
+git clone https://github.com/mntsx/LazyBW.git
 cd LazyBW
 go build -o lazybw ./cmd/lazybw
 sudo install -m 755 lazybw /usr/local/bin/lazybw
 ```
+
+The source build requires Git and Go 1.26.0 or later. If you prefer SSH and have a GitHub SSH key configured, use `git@github.com:mntsx/LazyBW.git` instead.
 
 ## Dependencies
 
@@ -40,9 +42,10 @@ Terminal dependencies:
 | --- | --- |
 | [`bw`](https://bitwarden.com/help/cli/) **(required)** | All Bitwarden authentication and remote vault operations; must be available on `PATH`. |
 | A UTF-8 terminal **(required)** | A terminal with true-color and mouse support is recommended. |
+| A monospaced icon font **(recommended)** | A font with Material Design Icons or Nerd Font glyphs keeps icons at their intended size and alignment. |
 | `wl-copy` (Wayland), `xclip` (X11), or `clip.exe` (WSL) **(optional)** | Copying values to the system clipboard. |
-| `tput` **(optional)** | Improved Backspace / Ctrl+Backspace detection through terminfo. |
-| Go **(build only)** | Compiling from source; not needed for a Snap installation. |
+| `tput` **(optional)** | Queries terminfo (`tput kbs`) to improve Backspace / Ctrl+Backspace distinction in compatible terminals. |
+| Go 1.26.0+ **(build only)** | Compiling from source; not needed for a Snap installation. |
 
 Go dependencies (automatically fetched through Go modules):
 
@@ -63,13 +66,13 @@ On first launch, LazyBW creates `settings.jsonc` and `keybinds.jsonc` in `~/.con
 "authentication": {
   "client_env_path": "$HOME/.config/lazybw/credentials.env",
   "default_server": "eu",
-  "backend_mode": ["bw", "bw serve"]
+  "backend_mode": ["bw serve", "bw"]
 }
 ```
 
 - `client_env_path`: path to a credentials file, or `null` to enter credentials manually. `$HOME` and `~/` are supported.
 - `default_server`: `"us"` (default) or `"eu"`.
-- `backend_mode`: `"bw"`, `"bw serve"`, or an ordered list of both. The default tries `bw` before `bw serve`; `bw serve` requires Bitwarden CLI 2025.9.0 or later and uses a private Unix socket.
+- `backend_mode`: `"bw"`, `"bw serve"`, or an ordered list of both. By default, LazyBW tries `bw serve` before falling back to `bw`; `bw serve` requires Bitwarden CLI 2025.9.0 or later and uses a private Unix socket.
 
 The credentials file accepts ordinary `.env` assignments, with or without `export`:
 
