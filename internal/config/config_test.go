@@ -85,6 +85,52 @@ func TestLoadPreservesExistingGitignore(t *testing.T) {
 	}
 }
 
+func TestResetRestoresOnlySelectedConfigurationFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(dir, "settings.jsonc")
+	keybindsPath := filepath.Join(dir, "keybinds.jsonc")
+	if err := os.WriteFile(settingsPath, []byte(`{"network":{"us_ping_url":"https://custom.example"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	originalKeybinds := []byte(`{"items":{"search":["x"]}}`)
+	if err := os.WriteFile(keybindsPath, originalKeybinds, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reset(dir, true, false); err != nil {
+		t.Fatal(err)
+	}
+	keybinds, err := os.ReadFile(keybindsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(keybinds) != string(originalKeybinds) {
+		t.Fatalf("keybinds changed while resetting settings: %q", keybinds)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Network.USPingURL != "https://api.bitwarden.com" {
+		t.Fatalf("settings were not reset: %q", cfg.Network.USPingURL)
+	}
+	if got := cfg.Keys("items", "search"); len(got) != 1 || got[0] != "x" {
+		t.Fatalf("custom keybind was not preserved: %v", got)
+	}
+	if err := Reset(dir, false, true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Keys("items", "search"); len(got) != 1 || got[0] != "f" {
+		t.Fatalf("keybinds were not reset: %v", got)
+	}
+}
+
 func TestKeybindOverridesReplaceDefaults(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "keybinds.jsonc"), []byte(`{

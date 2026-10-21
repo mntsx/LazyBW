@@ -30,6 +30,24 @@ func main() {
 }
 
 func run(args []string, stdin *os.File, stdout, stderr io.Writer) error {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		_, err := fmt.Fprint(stdout, helpText)
+		return err
+	}
+	if len(args) > 0 && args[0] == "reconfig" {
+		settings, keybinds, err := parseReconfig(args[1:], stdout)
+		if err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		if err := config.Reset("", settings, keybinds); err != nil {
+			return fmt.Errorf("reset configuration: %w", err)
+		}
+		_, err = fmt.Fprintln(stdout, reconfigSuccessMessage(settings, keybinds))
+		return err
+	}
 	cfg, err := config.Load("")
 	if err != nil {
 		return fmt.Errorf("configuration error: %w", err)
@@ -38,7 +56,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) error {
 		return runTUI(cfg)
 	}
 	if args[0] != "replicate" {
-		return fmt.Errorf("unknown command %q (expected: replicate)", args[0])
+		return fmt.Errorf("unknown command %q (run lazybw --help for usage)", args[0])
 	}
 	options, prompt, err := parseReplicate(args[1:], cfg, stdout)
 	if err != nil {
@@ -81,6 +99,42 @@ func runTUI(cfg config.Config) error {
 	state := ui.NewState(cfg, cli)
 	app := ui.New(state)
 	return app.Run()
+}
+
+func reconfigSuccessMessage(settings, keybinds bool) string {
+	switch {
+	case settings && keybinds:
+		return "Settings and keybinds restored to defaults"
+	case settings:
+		return "Settings restored to defaults"
+	case keybinds:
+		return "Keybinds restored to defaults"
+	default:
+		return "Configuration restored to defaults"
+	}
+}
+
+func parseReconfig(args []string, output io.Writer) (bool, bool, error) {
+	var settings, keybinds bool
+	flags := flag.NewFlagSet("reconfig", flag.ContinueOnError)
+	flags.SetOutput(output)
+	flags.BoolVar(&settings, "settings", false, "reset only settings")
+	flags.BoolVar(&keybinds, "keybinds", false, "reset only keybinds")
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: lazybw reconfig [--settings] [--keybinds]")
+		fmt.Fprintln(output, "Without flags, both configuration files are restored to defaults.")
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(args); err != nil {
+		return false, false, err
+	}
+	if flags.NArg() != 0 {
+		return false, false, errors.New("reconfig does not accept positional arguments")
+	}
+	if !settings && !keybinds {
+		return true, true, nil
+	}
+	return settings, keybinds, nil
 }
 
 func parseReplicate(args []string, cfg config.Config, output io.Writer) (replica.Options, bool, error) {

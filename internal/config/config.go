@@ -194,10 +194,10 @@ var DefaultKeybinds = map[string]map[string][]string{
 	"text_input": {
 		"cursor_start": {"home"}, "cursor_end": {"end"},
 		"delete_backward": {"backspace"}, "delete_forward": {"delete"},
-		"word_previous": {"ctrl+left", "alt+left", "alt+b"},
-		"word_next": {"ctrl+right", "alt+right", "alt+f"},
+		"word_previous":        {"ctrl+left", "alt+left", "alt+b"},
+		"word_next":            {"ctrl+right", "alt+right", "alt+f"},
 		"delete_word_previous": {"ctrl+w", "ctrl+backspace", "alt+backspace"},
-		"delete_word_next": {"ctrl+delete", "alt+delete", "alt+d"},
+		"delete_word_next":     {"ctrl+delete", "alt+delete", "alt+d"},
 	},
 	"edits": {
 		"save": {"s", "enter"}, "discard": {"d"},
@@ -220,17 +220,17 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"cursor_left": {"left"}, "cursor_right": {"right"},
 		"cursor_start": {"home"}, "cursor_end": {"end"},
 		"delete_backward": {"backspace"}, "delete_forward": {"delete"},
-		"word_previous": {"ctrl+left", "alt+left", "alt+b"},
-		"word_next": {"ctrl+right", "alt+right", "alt+f"},
+		"word_previous":        {"ctrl+left", "alt+left", "alt+b"},
+		"word_next":            {"ctrl+right", "alt+right", "alt+f"},
 		"delete_word_previous": {"ctrl+backspace", "alt+backspace"},
-		"delete_word_next": {"ctrl+delete", "alt+delete", "alt+d"},
-		"blank_line_previous": {"ctrl+up"}, "blank_line_next": {"ctrl+down"},
+		"delete_word_next":     {"ctrl+delete", "alt+delete", "alt+d"},
+		"blank_line_previous":  {"ctrl+up"}, "blank_line_next": {"ctrl+down"},
 		"select_left": {"shift+left"}, "select_right": {"shift+right"},
 		"select_up": {"shift+up"}, "select_down": {"shift+down"},
-		"select_word_previous": {"ctrl+shift+left"},
-		"select_word_next": {"ctrl+shift+right"},
+		"select_word_previous":       {"ctrl+shift+left"},
+		"select_word_next":           {"ctrl+shift+right"},
 		"select_blank_line_previous": {"ctrl+shift+up"},
-		"select_blank_line_next": {"ctrl+shift+down"},
+		"select_blank_line_next":     {"ctrl+shift+down"},
 	},
 
 	"confirmation_popup": {
@@ -491,6 +491,64 @@ func DefaultDirectory() (string, error) {
 	return filepath.Join(home, ".config", "lazybw"), nil
 }
 
+func defaultSettings() map[string]any {
+	return map[string]any{
+		"authentication":    map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
+		"local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"},
+		"network":           map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
+		"visual":            Visual{Icons: DefaultIcons, Colors: DefaultColors},
+	}
+}
+
+// Reset restores one or both configuration files to their generated defaults.
+func Reset(dir string, settings, keybinds bool) error {
+	if !settings && !keybinds {
+		return errors.New("select settings or keybinds to reset")
+	}
+	if dir == "" {
+		var err error
+		dir, err = DefaultDirectory()
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := createGitignore(dir); err != nil {
+		return err
+	}
+	resetFile := func(path string, defaults any) error {
+		unlock, err := acquireConfigLock(path)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		expected, err := os.ReadFile(path)
+		requireMissing := errors.Is(err, os.ErrNotExist)
+		if err != nil && !requireMissing {
+			return err
+		}
+		content, err := json.MarshalIndent(defaults, "", "  ")
+		if err != nil {
+			return err
+		}
+		content = annotateDefaults(filepath.Base(path), formatLongUnicodeEscapes(content))
+		return writeConfigAtomic(path, append(content, '\n'), expected, requireMissing)
+	}
+	if settings {
+		if err := resetFile(preferred(dir, "settings"), defaultSettings()); err != nil {
+			return fmt.Errorf("reset settings: %w", err)
+		}
+	}
+	if keybinds {
+		if err := resetFile(preferred(dir, "keybinds"), DefaultKeybinds); err != nil {
+			return fmt.Errorf("reset keybinds: %w", err)
+		}
+	}
+	return nil
+}
+
 // Load preserves configured values, persists missing defaults, and gives JSONC precedence.
 func Load(dir string) (Config, error) {
 	if dir == "" {
@@ -507,12 +565,7 @@ func Load(dir string) (Config, error) {
 		return Config{}, err
 	}
 	settingsPath := preferred(dir, "settings")
-	settingsDefaults := map[string]any{
-		"authentication":    map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
-		"local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"},
-		"network":           map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
-		"visual":            Visual{Icons: DefaultIcons, Colors: DefaultColors},
-	}
+	settingsDefaults := defaultSettings()
 	// Complete legacy colors only when that former root object already exists.
 	if existing, readErr := os.ReadFile(settingsPath); readErr == nil {
 		if normalized, normalizeErr := NormalizeJSONC(existing); normalizeErr == nil {

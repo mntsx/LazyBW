@@ -1,0 +1,23 @@
+LazyBW — terminal interface for Bitwarden
+
+Usage:
+  lazybw
+  lazybw replicate [--path FILE] [--client FILE.env] [--password VALUE]
+  lazybw reconfig [--settings] [--keybinds]
+  lazybw --help
+
+Commands:
+  replicate  Create or update the encrypted local vault replica.
+  reconfig   Restore configuration files to their default values.
+
+Reconfiguration:
+  With no flags, reconfig restores both settings.jsonc and keybinds.jsonc.
+  --settings   Restore only settings.jsonc.
+  --keybinds   Restore only keybinds.jsonc.
+
+Replication options:
+  --path FILE         Destination file without an extension.
+  --client FILE.env   Bitwarden API credentials file.
+  --password VALUE    Master password; omitting it uses a hidden terminal prompt.
+
+Configuration is stored in ~/.config/lazybw, or in LAZYBW_CONFIG_DIR when set.
