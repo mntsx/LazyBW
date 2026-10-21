@@ -44,7 +44,7 @@ func TestLoadPersistsMissingSettingsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Authentication.DefaultServer != "eu" || cfg.Colors["selection"] != "ansi_red" ||
+	if cfg.Authentication.DefaultServer != "eu" || !cfg.Authentication.CacheClientLogin || cfg.Colors["selection"] != "ansi_red" ||
 		!cfg.Local.SaveVault || cfg.Local.VaultPath != "$HOME/.local/share/lazybw/bw-vault" {
 		t.Fatalf("existing or first-load default settings are wrong: %+v", cfg)
 	}
@@ -56,6 +56,9 @@ func TestLoadPersistsMissingSettingsDefaults(t *testing.T) {
 	if _, exists := authentication["client_env_path"]; !exists {
 		t.Fatal("missing authentication subfield was not persisted")
 	}
+	if authentication["cache_client_login"] != true {
+		t.Fatalf("cache client login default = %#v, want true", authentication["cache_client_login"])
+	}
 	colors := object["colors"].(map[string]any)
 	if colors["selection"] != "ansi_red" || colors["background"] == nil {
 		t.Fatalf("color defaults were not merged safely: %#v", colors)
@@ -63,6 +66,33 @@ func TestLoadPersistsMissingSettingsDefaults(t *testing.T) {
 	if object["local_replication"] == nil || object["network"] == nil ||
 		object["custom"].(map[string]any)["keep"] != true {
 		t.Fatalf("root defaults or custom fields were lost: %#v", object)
+	}
+	if _, err = Load(directory); err != nil {
+		t.Fatal(err)
+	}
+	completedAgain, _ := readCompletedObject(t, path)
+	if completedAgain != content {
+		t.Fatal("settings default completion is not idempotent")
+	}
+}
+
+func TestLoadPreservesDisabledCacheClientLogin(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "settings.jsonc")
+	if err := os.WriteFile(path, []byte(`{"authentication":{"client_env_path":null,"cache_client_login":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Authentication.CacheClientLogin {
+		t.Fatal("explicitly disabled client-login cache was changed")
+	}
+	_, object := readCompletedObject(t, path)
+	authentication := object["authentication"].(map[string]any)
+	if authentication["cache_client_login"] != false {
+		t.Fatalf("persisted cache client login = %#v, want false", authentication["cache_client_login"])
 	}
 }
 

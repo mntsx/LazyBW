@@ -176,6 +176,9 @@ func (s *State) ClearWorkspaceNotice() {
 }
 
 func NewState(cfg config.Config, cli *bitwarden.Client) *State {
+	if cli != nil {
+		cli.ConfigureClientLoginCache(cfg.Directory, cfg.Authentication.CacheClientLogin, "")
+	}
 	backend := bitwarden.BackendBW
 	if len(cfg.Authentication.BackendMode) > 0 {
 		backend = bitwarden.BackendMode(cfg.Authentication.BackendMode[0])

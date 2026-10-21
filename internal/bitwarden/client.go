@@ -119,26 +119,31 @@ func overriddenEnvironment(inherited, overrides []string) []string {
 }
 
 type Client struct {
-	runner         Runner
-	mu             sync.Mutex
-	sessionSealed  *vault.Sealed
-	mode           BackendMode
-	serve          *BWServeBackend
-	repromptTag    [32]byte
-	repromptReady  bool
-	version        string
-	versionReady   bool
-	versionWait    chan struct{}
-	versionErr     error
-	serveHelpReady bool
-	serveHostname  bool
-	serveHelpWait  chan struct{}
-	serveHelpErr   error
-	profileStatus  map[string]map[string]any
-	profileDir     string
-	sessionDir     string
-	sessionLock    *os.File
-	Cipher         *vault.Cipher
+	runner                Runner
+	mu                    sync.Mutex
+	sessionSealed         *vault.Sealed
+	mode                  BackendMode
+	serve                 *BWServeBackend
+	repromptTag           [32]byte
+	repromptReady         bool
+	version               string
+	versionReady          bool
+	versionWait           chan struct{}
+	versionErr            error
+	serveHelpReady        bool
+	serveHostname         bool
+	serveHelpWait         chan struct{}
+	serveHelpErr          error
+	profileStatus         map[string]map[string]any
+	profileRegions        map[string]string
+	loginGenerations      map[string]string
+	cacheConfigDir        string
+	cacheClientLogin      bool
+	cacheExpectedClientID string
+	profileDir            string
+	sessionDir            string
+	sessionLock           *os.File
+	Cipher                *vault.Cipher
 }
 
 func NewClient(r Runner) (*Client, error) {
@@ -149,10 +154,17 @@ func NewClient(r Runner) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{
-		runner: r, Cipher: c, mode: BackendBW, serve: &BWServeBackend{},
-		profileStatus: make(map[string]map[string]any),
-	}, nil
+	serve := &BWServeBackend{}
+	if binary, ok := executableBinary(r); ok {
+		serve.Binary = binary
+	}
+	client := &Client{
+		runner: r, Cipher: c, mode: BackendBW, serve: serve,
+		profileStatus: make(map[string]map[string]any), profileRegions: make(map[string]string),
+		loginGenerations: make(map[string]string), cacheClientLogin: true,
+	}
+	client.loadPersistentCapabilities()
+	return client, nil
 }
 func (c *Client) call(ctx context.Context, op string, args []string, input []byte, vars []string, session bool) ([]byte, error) {
 	c.mu.Lock()
@@ -283,6 +295,7 @@ func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region st
 	}
 	c.mu.Lock()
 	c.profileDir = profile
+	c.profileRegions[profile] = region
 	c.clearSessionLocked()
 	c.repromptReady = false
 	c.repromptTag = [32]byte{}
@@ -294,6 +307,11 @@ func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region st
 	// A profile created in this private session has never been authenticated.
 	// US is the CLI default; EU only needs the direct endpoint write.
 	if fresh {
+		if status, restored := c.restoreCachedLogin(ctx, profile, region); restored {
+			c.setProfileStatus(profile, status)
+			return status, nil
+		}
+		c.restoreDevice(profile, region)
 		if region == "eu" {
 			if _, err := c.rawCLI(ctx, "config", "server", url); err != nil {
 				return nil, err
@@ -611,6 +629,7 @@ func (c *Client) cachedVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	c.savePersistentCapabilities()
 	return version, nil
 }
 
@@ -649,6 +668,7 @@ func (c *Client) cachedServeHostname(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	c.savePersistentCapabilities()
 	return hostname, nil
 }
 
@@ -758,6 +778,12 @@ func (c *Client) Login(ctx context.Context, id, secret string) error {
 		c.setProfileStatus(profile, map[string]any{"status": "unauthenticated"})
 	}
 	err = c.loginAPIKey(ctx, id, secret)
+	if err == nil {
+		c.mu.Lock()
+		c.cacheExpectedClientID = id
+		c.mu.Unlock()
+		c.persistLockedLogin(ctx, id, true)
+	}
 	c.invalidateProfileStatus(profile)
 	return err
 }
@@ -770,6 +796,12 @@ func (c *Client) LoginUnauthenticated(ctx context.Context, id, secret string) er
 	}
 	profile, _ := c.currentProfileStatus()
 	err := c.loginAPIKey(ctx, id, secret)
+	if err == nil {
+		c.mu.Lock()
+		c.cacheExpectedClientID = id
+		c.mu.Unlock()
+		c.persistLockedLogin(ctx, id, true)
+	}
 	c.invalidateProfileStatus(profile)
 	return err
 }
@@ -957,10 +989,18 @@ func (c *Client) HasSession() bool {
 func (c *Client) Close(ctx context.Context) {
 	// An unauthenticated or locked CLI has no active BW_SESSION to revoke.
 	// Spawning `bw lock` in that case only delays application shutdown.
+	locked := false
 	if c.HasSession() {
 		if c.BackendMode() != BackendBWServe || c.ServeRunning() {
-			_, _ = c.ses(ctx, "lock")
+			_, err := c.ses(ctx, "lock")
+			locked = err == nil
 		}
+	}
+	if locked {
+		c.mu.Lock()
+		clientID := c.cacheExpectedClientID
+		c.mu.Unlock()
+		c.persistLockedLogin(ctx, clientID, false)
 	}
 	if c.BackendMode() == BackendBWServe && c.serve != nil {
 		_ = c.serve.Stop(ctx)

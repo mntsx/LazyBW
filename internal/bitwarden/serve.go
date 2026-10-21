@@ -38,6 +38,7 @@ const (
 // BWServeBackend owns one private bw serve process and its Unix socket.
 // It never discovers or connects to a process it did not create.
 type BWServeBackend struct {
+	Binary    string
 	mu        sync.Mutex
 	cmd       *exec.Cmd
 	socketDir string
@@ -104,7 +105,11 @@ func (b *BWServeBackend) Start(ctx context.Context, profile, session string) err
 		return err
 	}
 	socket := filepath.Join(dir, "bw.sock")
-	cmd := exec.Command("bw", "serve", "--hostname", "unix://"+socket, "--port", "8087")
+	binary := b.Binary
+	if binary == "" {
+		binary = "bw"
+	}
+	cmd := exec.Command(binary, "serve", "--hostname", "unix://"+socket, "--port", "8087")
 	cmd.Env = overriddenEnvironment(os.Environ(), []string{
 		"BITWARDENCLI_APPDATA_DIR=" + profile,
 		"BW_SESSION=" + session,

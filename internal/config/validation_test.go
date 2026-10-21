@@ -33,6 +33,17 @@ func TestLoadRejectsInvalidSettingsValues(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsNonBooleanCacheClientLogin(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "settings.jsonc"), []byte(`{"authentication":{"cache_client_login":"yes"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(directory)
+	if !errors.Is(err, errInvalidConfigValue) || !strings.Contains(err.Error(), "authentication.cache_client_login") {
+		t.Fatalf("invalid cache client login error: %v", err)
+	}
+}
+
 func TestLoadRejectsInvalidKeybindValues(t *testing.T) {
 	cases := []struct {
 		name, content string

@@ -195,9 +195,9 @@ func TestLocalAndNetworkDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Local.SaveVault || cfg.Local.VaultPath != "$HOME/.local/share/lazybw/bw-vault" || cfg.Local.VaultEncryption != "aes-256-gcm" ||
+	if !cfg.Authentication.CacheClientLogin || cfg.Local.SaveVault || cfg.Local.VaultPath != "$HOME/.local/share/lazybw/bw-vault" || cfg.Local.VaultEncryption != "aes-256-gcm" ||
 		cfg.Network.USPingURL != "https://api.bitwarden.com" || cfg.Network.EUPingURL != "https://api.bitwarden.eu" {
-		t.Fatalf("unexpected backup configuration: %+v %+v", cfg.Local, cfg.Network)
+		t.Fatalf("unexpected default configuration: %+v %+v %+v", cfg.Authentication, cfg.Local, cfg.Network)
 	}
 	settings, err := os.ReadFile(filepath.Join(dir, "settings.jsonc"))
 	if err != nil {
@@ -205,5 +205,8 @@ func TestLocalAndNetworkDefaults(t *testing.T) {
 	}
 	if !strings.Contains(string(settings), "vault_encryption") || !strings.Contains(string(settings), "us_ping_url") {
 		t.Fatal("default settings omit local/network fields")
+	}
+	if !strings.Contains(string(settings), "\"client_env_path\": null,\n    \"cache_client_login\": true") {
+		t.Fatalf("cache client login default is not immediately after client env path:\n%s", settings)
 	}
 }

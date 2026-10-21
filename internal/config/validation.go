@@ -91,6 +91,9 @@ func validateSettings(settings map[string]json.RawMessage) string {
 	if _, ok := stringField(authentication, "client_env_path", true); !ok {
 		return "authentication.client_env_path"
 	}
+	if !boolField(authentication, "cache_client_login") {
+		return "authentication.cache_client_login"
+	}
 	server, ok := stringField(authentication, "default_server", false)
 	if !ok || (server != "us" && server != "eu") {
 		return "authentication.default_server"

@@ -38,6 +38,7 @@ func Run(ctx context.Context, cfg config.Config, cli *bitwarden.Client, options 
 		return errors.New("master password is empty")
 	}
 	defer func() { options.Password = "" }()
+	cli.ConfigureClientLoginCache(cfg.Directory, cfg.Authentication.CacheClientLogin, "")
 	options.report("Validating replica settings...")
 	if len(cfg.Authentication.BackendMode) > 0 {
 		if _, err := cli.SelectAvailableBackend(ctx, cfg.Authentication.BackendMode); err != nil {
@@ -48,6 +49,11 @@ func Run(ctx context.Context, cfg config.Config, cli *bitwarden.Client, options 
 		return err
 	}
 	region := config.NormalizeServer(cfg.Authentication.DefaultServer)
+	cacheClientID := ""
+	if id, _, readErr := bitwarden.ReadEnvCredentials(options.ClientPath); readErr == nil {
+		cacheClientID = id
+	}
+	cli.ConfigureClientLoginCache(cfg.Directory, cfg.Authentication.CacheClientLogin, cacheClientID)
 	options.report("Checking Bitwarden session...")
 	status, err := cli.ConfigureRegionStatus(ctx, cfg.Directory, region)
 	if err != nil {

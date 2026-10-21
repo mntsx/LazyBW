@@ -14,9 +14,17 @@ import (
 )
 
 type Authentication struct {
-	ClientEnvPath string   `json:"client_env_path"`
-	DefaultServer string   `json:"default_server"`
-	BackendMode   []string `json:"backend_mode"`
+	ClientEnvPath    string   `json:"client_env_path"`
+	CacheClientLogin bool     `json:"cache_client_login"`
+	DefaultServer    string   `json:"default_server"`
+	BackendMode      []string `json:"backend_mode"`
+}
+
+type authenticationDefaults struct {
+	ClientEnvPath    *string  `json:"client_env_path"`
+	CacheClientLogin bool     `json:"cache_client_login"`
+	DefaultServer    string   `json:"default_server"`
+	BackendMode      []string `json:"backend_mode"`
 }
 type Local struct {
 	SaveVault       bool   `json:"save_vault"`
@@ -493,7 +501,12 @@ func DefaultDirectory() (string, error) {
 
 func defaultSettings() map[string]any {
 	return map[string]any{
-		"authentication":    map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
+		"authentication": authenticationDefaults{
+			ClientEnvPath:    nil,
+			CacheClientLogin: true,
+			DefaultServer:    "us",
+			BackendMode:      []string{"bw serve", "bw"},
+		},
 		"local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"},
 		"network":           map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
 		"visual":            Visual{Icons: DefaultIcons, Colors: DefaultColors},
@@ -600,6 +613,7 @@ func Load(dir string) (Config, error) {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(raw, &fields) == nil {
 			_ = json.Unmarshal(fields["client_env_path"], &c.Authentication.ClientEnvPath)
+			_ = json.Unmarshal(fields["cache_client_login"], &c.Authentication.CacheClientLogin)
 			_ = json.Unmarshal(fields["default_server"], &c.Authentication.DefaultServer)
 			modes, modeErr := decodeBackendModes(fields["backend_mode"])
 			if modeErr != nil {

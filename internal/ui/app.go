@@ -40,9 +40,9 @@ type App struct {
 	itemScroll, contentScroll                 int
 	sideScroll                                [4]int
 	itemX, itemW, contentX, contentW, detailX int
-	detailW                                    int
-	renderWidth, renderHeight                  int
-	detailY, detailH                           int
+	detailW                                   int
+	renderWidth, renderHeight                 int
+	detailY, detailH                          int
 	terminalBS                                byte
 	nativeWordKeys                            []terminalkeys.Binding
 	submitFlash                               submitFlashTarget
@@ -200,6 +200,13 @@ func (a *App) startupWithUpdates(
 		}
 		s.BackendSelected = true
 	}
+	cacheClientID := ""
+	if autoLogin && s.Config.Authentication.ClientEnvPath != "" {
+		if id, _, readErr := bitwarden.ReadEnvCredentials(s.Config.Authentication.ClientEnvPath); readErr == nil {
+			cacheClientID = id
+		}
+	}
+	s.CLI.ConfigureClientLoginCache(s.Config.Directory, s.Config.Authentication.CacheClientLogin, cacheClientID)
 	status, err := s.CLI.ConfigureRegionStatus(ctx, s.Config.Directory, s.Server)
 	if err != nil {
 		update(func(*gocui.Gui) error {

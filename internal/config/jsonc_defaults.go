@@ -236,7 +236,8 @@ func collectDefaultInsertions(source []byte, object *jsonObjectNode, defaults ma
 	missing := make([]string, 0)
 	for _, key := range keys {
 		current := object.fields[key]
-		childDefaults, nested := defaults[key].(map[string]any)
+		childDefaults, nestedErr := defaultObject(defaults[key])
+		nested := nestedErr == nil
 		if current == nil {
 			missing = append(missing, key)
 			continue
@@ -252,6 +253,26 @@ func collectDefaultInsertions(source []byte, object *jsonObjectNode, defaults ma
 	}
 	closeIndent, insertionPosition, startsOnNewLine := objectClosingIndent(source, object)
 	childIndent := objectChildIndent(source, object, closeIndent)
+	// cache_client_login is documented next to the credentials file. Keep that
+	// relationship when completing existing JSONC without rewriting comments.
+	if clientPath := object.fields["client_env_path"]; clientPath != nil {
+		for index, key := range missing {
+			if key != "cache_client_login" {
+				continue
+			}
+			encoded, err := json.Marshal(defaults[key])
+			if err != nil {
+				return err
+			}
+			name, _ := json.Marshal(key)
+			*edits = append(*edits, jsonInsertion{position: clientPath.end, content: ",\n" + childIndent + string(name) + ": " + string(encoded)})
+			missing = append(missing[:index], missing[index+1:]...)
+			break
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
 	entries := make([]string, 0, len(missing))
 	for _, key := range missing {
 		encoded, err := json.MarshalIndent(defaults[key], "", "  ")
