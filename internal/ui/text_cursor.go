@@ -106,7 +106,7 @@ func detailDisplayOffsets(value string, caret, width int, wrap bool) [][]int {
 // editCaretPoint maps the active textbox caret to the canvas coordinates.
 func (a *App) editCaretPoint(width, height int) (int, int, bool) {
 	s := a.S
-	if s.Popup != nil || s.Mode == DialogServer || s.Screen == AuthChecking || s.Busy {
+	if s.Popup != nil || s.Mode == DialogServer || s.Mode == DialogBackend || s.Screen == AuthChecking || s.Busy {
 		return 0, 0, false
 	}
 	if s.Screen != Workspace {

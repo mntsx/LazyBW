@@ -56,6 +56,18 @@ func TestServerSelectorAndAuthScreen(t *testing.T) {
 	}
 }
 
+func TestBackendSelectorHidesAuthCursor(t *testing.T) {
+	for _, screen := range []Screen{AuthClient, AuthMaster, AuthOffline} {
+		s := setup(t)
+		s.Screen, s.Mode, s.AuthFocus = screen, DialogBackend, 0
+		a := New(s)
+
+		if _, _, visible := a.editCaretPoint(100, 32); visible {
+			t.Fatalf("%v: auth textbox cursor visible over backend selector", screen)
+		}
+	}
+}
+
 func TestDefaultServerIsNotChangedBySelection(t *testing.T) {
 	cfg := config.Config{Authentication: config.Authentication{DefaultServer: "eu"}}
 	s := NewState(cfg, nil)
