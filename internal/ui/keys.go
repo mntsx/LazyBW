@@ -13,15 +13,21 @@ import (
 	"github.com/miguelmnts/lazybw-go/internal/vault"
 )
 
-func (a *App) bind(g *gocui.Gui) error {
-	a.terminalBS = terminalBackspaceCode()
+// terminalEventBinding describes terminal input transport. Its labels identify
+// events reported by gocui; they must never choose an action, default binding,
+// or footer hint. Add user-facing shortcuts only in config.DefaultKeybinds so
+// they are written to and completed in keybinds.jsonc.
+type terminalEventBinding struct {
+	key      interface{}
+	name     string
+	modifier gocui.Modifier
+	fallback func() error
+}
 
-	bindings := []struct {
-		key      interface{}
-		name     string
-		modifier gocui.Modifier
-		fallback func() error
-	}{
+const terminalEnterLabel = "enter"
+
+func terminalEventBindings() []terminalEventBinding {
+	return []terminalEventBinding{
 		{gocui.KeyArrowUp, "up", gocui.ModNone, nil},
 		{gocui.KeyArrowDown, "down", gocui.ModNone, nil},
 		{gocui.KeyArrowLeft, "left", gocui.ModNone, nil},
@@ -48,7 +54,27 @@ func (a *App) bind(g *gocui.Gui) error {
 		{gocui.KeyCtrlV, "ctrl+v", gocui.ModNone, nil},
 		{gocui.KeyCtrlN, "ctrl+n", gocui.ModNone, nil},
 	}
-	for _, entry := range bindings {
+}
+
+// nativeTerminalLabel prevents a duplicate gocui registration for an event
+// already captured by terminalEventBindings. This is transport bookkeeping,
+// not a keymap: configuredBindings remains the only action resolver.
+func nativeTerminalLabel(label string) bool {
+	label = normalizedBindingKey(label)
+	for _, binding := range terminalEventBindings() {
+		if normalizedBindingKey(binding.name) == label {
+			return true
+		}
+	}
+	return false
+}
+
+// bind registers terminal events only. It must dispatch the configured action
+// and never assign a user-facing key combination or fallback shortcut here.
+func (a *App) bind(g *gocui.Gui) error {
+	a.terminalBS = terminalBackspaceCode()
+
+	for _, entry := range terminalEventBindings() {
 		spec := entry
 		if err := g.SetKeybinding("", spec.key, spec.modifier,
 			func(_ *gocui.Gui, _ *gocui.View) error {
@@ -101,6 +127,9 @@ func (a *App) bind(g *gocui.Gui) error {
 				return nil
 			}); err != nil { return err }
 	}
+	// Ctrl+arrow labels below are terminal transport identifiers only. They
+	// dispatch solely through Config.Keys; do not assign or display a shortcut
+	// here—add defaults in config.DefaultKeybinds instead.
 	for _, binding := range []struct {
 		key       gocui.Key
 		label     string
@@ -120,6 +149,8 @@ func (a *App) bind(g *gocui.Gui) error {
 			return err
 		}
 	}
+	// Selection-modified arrow labels are likewise transport syntax, never a
+	// fallback keymap. The configured detail action decides whether they work.
 	for _, binding := range []struct {
 		key       gocui.Key
 		direction int
@@ -164,7 +195,9 @@ type wordKeyBinding struct {
 }
 
 // wordKeyBindings supports native Ctrl-modified keys and widely used Meta
-// editing keys. No synthetic F-keys or terminal configuration is needed.
+// editing keys. These are terminal event labels, not bindings to actions: each
+// event is resolved through Config.Keys. Do not add defaults here; put them in
+// config.DefaultKeybinds so JSONC creation and completion use the same values.
 func wordKeyBindings() []wordKeyBinding {
 	return []wordKeyBinding{
 		{gocui.KeyArrowLeft, gocui.ModMouseCtrl, "ctrl+left", -1, false},
@@ -306,6 +339,8 @@ func (a *App) creationTextInputLocked() bool {
 		(a.S.FormFocus != 0 || a.creationValidationPending())
 }
 
+// char handles text input only; DefaultKeybinds is the sole source of
+// character-command bindings and dispatches them through configuredShortcut.
 func (a *App) char(r rune) error {
 	s := a.S
 	if s.Mode == DialogServer || s.Mode == DialogBackend || s.Screen == AuthChecking || s.Screen == AuthOffline {
@@ -315,57 +350,12 @@ func (a *App) char(r rune) error {
 		if s.Popup.Blocking {
 			return nil
 		}
-		if s.Popup.RemoteReview != nil {
-			switch r {
-			case 's', 'S':
-				s.Popup.RemoteChoice = 0
-				return a.enter()
-			case 'h', 'H':
-				if s.Stage.Len() == 0 {
-					return nil
-				}
-				s.Popup.RemoteChoice = 1
-				return a.enter()
-			case 'a', 'A':
-				s.Popup.RemoteChoice = 2
-				return a.enter()
-			}
-		}
-		if r == 'y' || r == 'Y' {
-			s.Popup.Yes = true
-			return a.enter()
-		}
-		if r == 'n' || r == 'N' {
-			s.Popup.Yes = false
-			return a.enter()
-		}
-		if r == 'c' || r == 'C' {
-			s.Popup = nil
-			return nil
-		}
-		if r == '?' {
-			pageSize := 10
-			if s.Popup.RemoteReview != nil {
-				pageSize = a.reviewPageSize()
-			}
-			if len(s.Popup.Lines) > pageSize {
-				s.Popup.Page = (s.Popup.Page + 1) % ((len(s.Popup.Lines) + pageSize - 1) / pageSize)
-			}
-		}
-		return nil
+		_, err := a.dispatchConfiguredKey(string(r))
+		return err
 	}
 	if s.Mode == DialogFoldersChoice {
-		if r == 's' || r == 'S' {
-			if s.ChoiceIndex >= 0 && s.ChoiceIndex < len(s.Folders) {
-				id := fmt.Sprint(s.Folders[s.ChoiceIndex]["id"])
-				if s.FolderChoiceID == id {
-					s.FolderChoiceID = ""
-				} else {
-					s.FolderChoiceID = id
-				}
-			}
-		}
-		return nil
+		_, err := a.dispatchConfiguredKey(string(r))
+		return err
 	}
 	if s.Mode == DialogCardBrand || s.Mode == DialogIdentityTitle {
 		return nil
@@ -416,161 +406,131 @@ func (a *App) char(r rune) error {
 		}
 		return nil
 	}
-	switch r {
-	case '?':
-		a.nextHintPage()
-	case '1', '2', '3', '4', '5', '6', '7':
-		pane := paneForNumber(s, int(r-'0'))
-		if pane == 0 {
-			return nil
-		}
-		if pane == s.Focus {
-			// The active panel number acts as Return rather than reselecting it.
-			if pane == PaneContent {
-				s.CloseItem()
-			} else if pane != PaneItems {
-				s.Focus = PaneItems
-			}
-		} else if pane <= PaneItems || (pane == PaneContent && s.SelectedID != "") {
-			// Re-entering protected content must pass the re-prompt again.
-			if pane == PaneContent {
-				if item := s.SelectedItem(); item != nil && (item.Raw["reprompt"] == 1 || item.Raw["reprompt"] == float64(1)) && s.RepromptApprovedID != item.ID() {
-					a.startReprompt(item.ID())
-					return nil
-				}
-			}
-			s.Focus = pane
-			if pane <= PaneChanges {
-				s.RepromptApprovedID = ""
-			}
-			if pane == PaneChanges {
-				s.ChangeIndex = min(s.ChangeIndex, max(0, len(s.ChangesList())-1))
-			}
-		}
-	case 'f':
-		if s.Focus == PaneItems {
-			s.Mode = Find
-			s.Input = s.Search
-			s.Caret = len([]rune(s.Input))
-		} else if s.Focus == PaneContent {
-			s.ToggleFavourite()
-		}
-	case 'n':
-		if s.LocalMode {
-			return nil
-		}
-		switch s.Focus {
-		case PaneItems:
-			s.NewType = 0
-			s.InputEncryptedLimit = 0
-			s.FormFocus = 0
-			s.FormError = ""
-			s.Mode = DialogCreate
-		case PaneFolders:
-			if s.LocalMode {
-				return nil
-			}
-			s.Input = ""
-			s.Caret = 0
-			s.InputEncryptedLimit = vault.Schema().EditableTextLimits.FolderName
-			s.FormFocus = 0
-			s.FormError = ""
-			s.Mode = DialogFolder
-		case PaneContent:
-			if s.LocalMode || s.SelectedItem() == nil || !s.SelectedItem().CanEdit() {
-				return nil
-			}
-			s.Input = ""
-			s.Caret = 0
-			s.InputEncryptedLimit = 0
-			s.CustomType = 0
-			s.FormFocus = 0
-			s.FormError = ""
-			s.Mode = DialogFieldType
-		}
-	case 'd':
-		if s.LocalMode {
-			return nil
-		}
-		switch s.Focus {
-		case PaneItems:
-			it := s.CurrentItem()
-			if it != nil && it.CanEdit() {
-				a.confirm("Delete item?", "Delete "+it.Name()+"?", nil, false, false, func(ok bool) {
-					if !ok {
-						return
-					}
-					// Re-verify even if Content was previously unlocked.
-					if it.Raw["reprompt"] == 1 || it.Raw["reprompt"] == float64(1) {
-						a.startReprompt(it.ID())
-						s.RepromptDeleteID = it.ID()
-						return
-					}
-					s.DeleteItem()
-				})
-			}
-		case PaneChanges:
-			if !s.ImportedChangeAt(s.ChangeIndex) {
-				a.confirmStage(false, false)
-			}
-		case PaneFolders:
-			if s.Filters[2] >= 1 && s.Filters[2] <= len(s.Folders) {
-				folder := s.Folders[s.Filters[2]-1]
-				a.confirm("Delete folder?", "Delete "+fmt.Sprint(folder["name"])+"?", nil, false, false, func(ok bool) {
-					if ok {
-						s.DeleteFolder()
-					}
-				})
-			}
-		case PaneContent:
-			it := s.SelectedItem()
-			f := s.CurrentField()
-			if it != nil && it.CanEdit() && f != nil && f.Custom && f.Editable {
-				a.confirm("Delete field?", "Delete "+f.Name+"?", nil, false, false, func(ok bool) {
-					if !ok {
-						return
-					}
-					arr, _ := it.Raw["fields"].([]any)
-					idx := f.Path[1].(int)
-					it.Raw["fields"] = append(arr[:idx], arr[idx+1:]...)
-					s.Stage.Record("item", it.Raw, vault.TypeNames[it.Type()], s.Originals)
-					s.loadFields()
-				})
-			}
-		}
-	case 'e':
-		if s.Focus == PaneContent {
-			return s.BeginEdit()
-		}
-	case 'c':
-		if s.Focus == PaneContent {
-			f := s.CurrentField()
-			if f != nil && !f.Restricted {
-				v, err := f.Reveal(s.CLI.Cipher)
-				if err == nil {
-					err = a.clipboard(v)
-				}
-				if err != nil {
-					s.SetWorkspaceNotice("Clipboard copy failed", CRed)
-				} else {
-					s.SetWorkspaceNotice("Copied to clipboard", CWhite)
-				}
-			}
-		}
-	case 'r':
-		if s.Focus == PaneContent {
-			s.Reveal()
-		}
-	case 's':
-		if s.LocalMode {
-			return nil
-		}
-		if s.Focus == PaneChanges && !s.ImportedChangeAt(s.ChangeIndex) {
-			a.confirmStage(true, false)
-		} else if s.Focus == PaneContent {
-			return s.SwitchCheckbox()
-		}
+	_, err := a.dispatchConfiguredKey(string(r))
+	return err
+}
+
+// nextPopupPage advances the current popup page without depending on its key.
+func (a *App) nextPopupPage() error {
+	s := a.S
+	pageSize := 10
+	if s.Popup.RemoteReview != nil {
+		pageSize = a.reviewPageSize()
 	}
+	if len(s.Popup.Lines) > pageSize {
+		s.Popup.Page = (s.Popup.Page + 1) % ((len(s.Popup.Lines) + pageSize - 1) / pageSize)
+	}
+	return nil
+}
+
+// chooseRemoteSync selects a sync-popup action without encoding a shortcut.
+func (a *App) chooseRemoteSync(choice int) error {
+	if choice == 1 && a.S.Stage.Len() == 0 {
+		return nil
+	}
+	a.S.Popup.RemoteChoice = choice
+	return a.enter()
+}
+
+func (a *App) setPopupConfirmation(yes bool) error {
+	a.S.Popup.Yes = yes
+	return a.enter()
+}
+
+func (a *App) cancelPopup() error {
+	a.S.Popup = nil
+	return nil
+}
+
+func (a *App) toggleFolderChoice() error {
+	s := a.S
+	if s.ChoiceIndex < 0 || s.ChoiceIndex >= len(s.Folders) {
+		return nil
+	}
+	id := fmt.Sprint(s.Folders[s.ChoiceIndex]["id"])
+	if s.FolderChoiceID == id {
+		s.FolderChoiceID = ""
+	} else {
+		s.FolderChoiceID = id
+	}
+	return nil
+}
+
+func (a *App) startSearch() error {
+	s := a.S
+	s.Mode = Find
+	s.Input = s.Search
+	s.Caret = len([]rune(s.Input))
+	return nil
+}
+
+func (a *App) toggleFavorite() error {
+	a.S.ToggleFavourite()
+	return nil
+}
+
+func (a *App) createWorkspaceItem() error {
+	s := a.S
+	switch s.Focus {
+	case PaneItems:
+		s.NewType, s.InputEncryptedLimit, s.FormFocus, s.FormError = 0, 0, 0, ""
+		s.Mode = DialogCreate
+	case PaneFolders:
+		s.Input, s.Caret = "", 0
+		s.InputEncryptedLimit, s.FormFocus, s.FormError = vault.Schema().EditableTextLimits.FolderName, 0, ""
+		s.Mode = DialogFolder
+	case PaneContent:
+		s.Input, s.Caret, s.InputEncryptedLimit, s.CustomType, s.FormFocus, s.FormError = "", 0, 0, 0, 0, ""
+		s.Mode = DialogFieldType
+	}
+	return nil
+}
+
+func (a *App) deleteWorkspaceItem() error {
+	s := a.S
+	switch s.Focus {
+	case PaneItems:
+		it := s.CurrentItem()
+		a.confirm("Delete item?", "Delete "+it.Name()+"?", nil, false, false, func(ok bool) {
+			if !ok { return }
+			if it.Raw["reprompt"] == 1 || it.Raw["reprompt"] == float64(1) {
+				a.startReprompt(it.ID())
+				s.RepromptDeleteID = it.ID()
+				return
+			}
+			s.DeleteItem()
+		})
+	case PaneChanges:
+		if !s.ImportedChangeAt(s.ChangeIndex) { a.confirmStage(false, false) }
+	case PaneFolders:
+		folder := s.Folders[s.Filters[2]-1]
+		a.confirm("Delete folder?", "Delete "+fmt.Sprint(folder["name"])+"?", nil, false, false, func(ok bool) {
+			if ok { s.DeleteFolder() }
+		})
+	case PaneContent:
+		it, f := s.SelectedItem(), s.CurrentField()
+		a.confirm("Delete field?", "Delete "+f.Name+"?", nil, false, false, func(ok bool) {
+			if !ok { return }
+			arr, _ := it.Raw["fields"].([]any)
+			idx := f.Path[1].(int)
+			it.Raw["fields"] = append(arr[:idx], arr[idx+1:]...)
+			s.Stage.Record("item", it.Raw, vault.TypeNames[it.Type()], s.Originals)
+			s.loadFields()
+		})
+	}
+	return nil
+}
+
+func (a *App) copyCurrentField() error {
+	f := a.S.CurrentField()
+	v, err := f.Reveal(a.S.CLI.Cipher)
+	if err == nil { err = a.clipboard(v) }
+	if err != nil { a.S.SetWorkspaceNotice("Clipboard copy failed", CRed) } else { a.S.SetWorkspaceNotice("Copied to clipboard", CWhite) }
+	return nil
+}
+
+func (a *App) revealCurrentField() error {
+	a.S.Reveal()
 	return nil
 }
 

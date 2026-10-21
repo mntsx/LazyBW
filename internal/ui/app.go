@@ -1031,7 +1031,9 @@ func (a *App) popupRender(c *Canvas) {
 		}
 	}
 	if len(p.Lines) > 10 {
-		c.Text(x+3, y+height-6, fmt.Sprintf("? ...   page %d/%d", p.Page+1, (len(p.Lines)+9)/10), CBBlack, CDefault)
+		c.Text(x+3, y+height-6,
+			a.popupPageHint("confirmation_popup", "next_page", "...", p.Page+1, (len(p.Lines)+9)/10),
+			CBBlack, CDefault)
 	}
 	yes := CGreen
 	no := CRed
@@ -1559,7 +1561,7 @@ func (a *App) remoteReviewRender(c *Canvas) {
 	lineAfterList := y + 6 + visible
 	if paginated {
 		c.Text(x+3, lineAfterList,
-			fmt.Sprintf("? next page  %d/%d", p.Page+1,
+			a.popupPageHint("sync_popup", "next_page", "next page", p.Page+1,
 				(len(p.Lines)+visible-1)/visible), CBBlack, CDefault)
 		lineAfterList++
 	}

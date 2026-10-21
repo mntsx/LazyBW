@@ -235,7 +235,7 @@ var DefaultKeybinds = map[string]map[string][]string{
 
 	"confirmation_popup": {
 		"confirm": {"enter"}, "cancel": {"escape", "c"},
-		"accept": {"y"}, "reject": {"n"},
+		"accept": {"y"}, "reject": {"n"}, "next_page": {"?"},
 		"button_left": {"left"}, "button_right": {"right"},
 	},
 	"sync_popup": {

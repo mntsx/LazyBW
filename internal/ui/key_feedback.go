@@ -2,63 +2,22 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/awesome-gocui/gocui"
 )
 
-// keyLabel converts terminal special keys into readable footer labels.
+// keyLabel converts a terminal event into its transport label. It deliberately
+// reuses terminalEventBindings rather than defining any user-facing shortcut;
+// actions and their defaults are resolved only through Config.Keys.
 func keyLabel(key interface{}) string {
-	switch key {
-	case gocui.KeyArrowUp:
-		return "↑"
-	case gocui.KeyArrowDown:
-		return "↓"
-	case gocui.KeyArrowLeft:
-		return "←"
-	case gocui.KeyArrowRight:
-		return "→"
-	case gocui.KeyEnter:
-		return "enter"
-	case gocui.KeyEsc:
-		return "esc"
-	case gocui.KeyCtrlQ:
-		return "ctrl+q"
-	case gocui.KeyCtrlS:
-		return "ctrl+s"
-	case gocui.KeyCtrlP:
-		return "ctrl+p"
-	case gocui.KeyCtrlD:
-		return "ctrl+d"
-	case gocui.KeyCtrlR:
-		return "ctrl+r"
-	case gocui.KeyCtrlJ:
-		return "ctrl+j"
-	case gocui.KeyCtrlW:
-		return "ctrl+w"
-	case gocui.KeyCtrlZ:
-		return "ctrl+z"
-	case gocui.KeyCtrlY:
-		return "ctrl+y"
-	case gocui.KeyCtrlC:
-		return "ctrl+c"
-	case gocui.KeyCtrlV:
-		return "ctrl+v"
-	case gocui.KeyCtrlN:
-		return "ctrl+n"
-	case gocui.KeyBackspace, gocui.KeyBackspace2:
-		return "backspace"
-	case gocui.KeyDelete:
-		return "delete"
-	case gocui.KeyHome:
-		return "home"
-	case gocui.KeyEnd:
-		return "end"
-	case gocui.KeyTab:
-		return "tab"
-	case gocui.KeySpace:
+	for _, binding := range terminalEventBindings() {
+		if binding.key == key {
+			return binding.name
+		}
+	}
+	if key == gocui.KeySpace {
 		return "space"
 	}
 	if r, ok := key.(rune); ok && r >= 32 {
@@ -82,8 +41,9 @@ func (a *App) reportKey(key, action string) {
 func (a *App) handleKey(key string, action func() error) error {
 	textEntry := a.textEntryActive()
 	// Hint pagination should change pages immediately without showing input
-	// feedback, even when the previous key's feedback is still visible.
-	if key == "?" && !textEntry {
+	// feedback, even when the previous key's feedback is still visible. Resolve
+	// the key through configuration; do not place a literal shortcut here.
+	if a.isConfiguredKey(key, "global", "hint_next_page") && !textEntry {
 		err := action()
 		a.S.KeyFeedbackExpires = time.Time{}
 		a.feedbackActive.Store(false)
@@ -112,6 +72,15 @@ func (a *App) handleKey(key string, action func() error) error {
 	}
 	a.reportKey(key, label)
 	return err
+}
+
+func (a *App) isConfiguredKey(key, section, action string) bool {
+	for _, binding := range a.S.Config.Keys(section, action) {
+		if normalizedBindingKey(binding) == normalizedBindingKey(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // feedbackSnapshot contains only non-secret navigation metadata. Do not copy
@@ -195,252 +164,18 @@ func (a *App) textEntryActive() bool {
 	return false
 }
 
-// keyAction describes the key operation in the current context.
+// keyAction describes a configured action that is currently available. Key
+// combinations are defined solely by the configured keymap; text entry is the
+// only generic fallback because it represents input rather than a shortcut.
 func (a *App) keyAction(key string) string {
-	s := a.S
-	if s.Screen == AuthChecking || s.Busy {
-		return "unbound"
-	}
-	if key == "ctrl+s" {
-		if s.Screen == Workspace && !s.LocalMode && s.ServerConnected &&
-			s.Popup == nil && !s.Busy && (s.Mode == Browse || s.Mode == Find) {
-			return "synchronize"
-		}
-		return "unbound"
-	}
-
-	if s.Popup != nil {
-		if s.Popup.Blocking {
-			return "unbound"
-		}
-		if s.Popup.Acknowledge {
-			if key == "enter" {
-				return "confirm"
-			}
-			if key == "esc" {
-				return "cancel"
-			}
-			return "unbound"
-		}
-		switch key {
-		case "←", "→", "↑", "↓":
-			return "choose"
-		case "enter", "y", "n", "s", "h", "a":
-			if s.Popup.RemoteReview != nil && (key == "y" || key == "n") {
-				return "unbound"
-			}
-			if s.Popup.RemoteReview == nil && (key == "s" || key == "h" || key == "a") {
-				return "unbound"
-			}
-			return "confirm"
-		case "c", "esc":
-			return "cancel"
-		case "?":
-			pageSize := 10
-			if s.Popup.RemoteReview != nil {
-				pageSize = a.reviewPageSize()
-			}
-			if len(s.Popup.Lines) > pageSize {
-				return "next page"
-			}
-		}
-		return "unbound"
-	}
-	if s.Mode == DialogServer || s.Mode == DialogBackend {
-		switch key {
-		case "↑", "↓":
-			return "move"
-		case "enter":
-			return "select"
-		case "esc":
-			return "cancel"
-		}
-		return "unbound"
-	}
-	if s.Mode == DialogReprompt && key == "ctrl+r" {
-		return "reveal"
-	}
-	if s.Screen != Workspace {
-		switch key {
-		case "ctrl+s":
-			return "server"
-		case "ctrl+b":
-			return "backend"
-		case "↑", "↓", "←", "→":
-			return "move"
-		case "enter":
-			return "select"
-		case "esc":
-			return "quit"
-		case "backspace", "delete", "ctrl+w":
-			return "delete"
-		case "ctrl+r":
-			return "reveal"
-		}
-		if utf8.RuneCountInString(key) == 1 && s.AuthFocus < 2 {
-			return "type"
-		}
-		return "unbound"
-	}
-	if strings.HasPrefix(key, "alt+") {
-		return "unbound"
-	}
-	// Global controls are only actions when the current context permits them.
-	// Ctrl+R is an authentication-only reveal key, not a workspace shortcut.
-	if key == "ctrl+q" && !a.modalOpen() {
-		return "quit"
-	}
-	if (key == "ctrl+p" || key == "ctrl+d") &&
-		!a.modalOpen() && s.Stage.Len() > 0 {
-		if key == "ctrl+p" {
-			if s.ServerConnected {
-				return "push"
-			}
-			return "unbound"
-		}
-		return "discard"
-	}
-	if s.Mode == DialogCreate || s.Mode == DialogFieldType || s.Mode == DialogWebsite || s.Mode == DialogLinkedChoice {
-		switch key {
-		case "↑", "↓":
-			return "move"
-		case "enter":
-			return "select"
-		case "esc":
-			return "cancel"
-		}
-		return "unbound"
-	}
-	if s.Mode == DialogName || s.Mode == DialogField || s.Mode == DialogFolder {
-		switch key {
-		case "enter":
-			return "select"
-		case "esc":
-			return "cancel"
-		case "←", "→", "↑", "↓":
-			return "move"
-		case "backspace", "delete", "ctrl+delete", "ctrl+backspace":
-			return "delete"
-		}
-		if utf8.RuneCountInString(key) == 1 && s.FormFocus == 0 {
-			return "type"
-		}
-		return "unbound"
-	}
-	if s.Mode == Edit || s.Mode == Find {
-		if key == "↑" && s.Mode == Find {
-			return "return"
-		}
-		switch key {
-		case "enter":
-			return "apply"
-		case "esc":
-			return "cancel"
-		case "←", "→", "ctrl+←", "ctrl+→", "home", "end":
-			return "move"
-		case "backspace", "delete", "ctrl+backspace", "ctrl+delete", "ctrl+w":
-			return "delete"
-		case "ctrl+j":
-			return "newline"
-		}
-		if utf8.RuneCountInString(key) == 1 || key == "space" {
-			return "type"
-		}
-		return "unbound"
-	}
-	if key == "esc" || key == "←" && s.Focus != PaneItems {
-		if s.Focus != PaneItems {
-			return "return"
-		}
-		return "unbound"
-	}
-	if key == "↑" || key == "↓" {
-		return "move"
-	}
-	if key == "→" {
-		if s.Focus == PaneItems && len(s.Filtered()) > 0 {
-			return "open"
-		}
-		if s.Focus == PaneContent && s.CurrentField() != nil &&
-			!isCheckboxField(s.CurrentField()) {
-			return "edit"
+	key = normalizedBindingKey(key)
+	for _, binding := range a.configuredBindings()[key] {
+		if a.aliasAvailable(binding.section, binding.action) {
+			return aliasActionName(binding.section, binding.action)
 		}
 	}
-	if key == "enter" {
-		switch s.Focus {
-		case PaneItems:
-			if len(s.Filtered()) > 0 {
-				return "open"
-			}
-		case PaneContent:
-			if s.CurrentField() != nil && !isCheckboxField(s.CurrentField()) {
-				return "edit"
-			}
-		case PaneChanges:
-			if s.Stage.Len() > 0 && s.ServerConnected && !s.ImportedChangeAt(s.ChangeIndex) {
-				return "push"
-			}
-		default:
-			return "select"
-		}
-	}
-	if len(key) == 1 && key[0] >= '1' && key[0] <= '7' {
-		pane := paneForNumber(s, int(key[0]-'0'))
-		if pane == 0 {
-			return "unbound"
-		}
-		if pane == s.Focus {
-			return "return"
-		}
-		if pane <= PaneItems || pane == PaneContent && s.SelectedID != "" {
-			return "panels"
-		}
-		return "unbound"
-	}
-	switch key {
-	case "?":
-		return "next page"
-	case "f":
-		if s.Focus == PaneItems {
-			return "find"
-		}
-		if s.Focus == PaneContent && !s.LocalMode && s.SelectedItem() != nil {
-			return "favourite"
-		}
-	case "n":
-		if s.Focus == PaneItems || s.Focus == PaneFolders ||
-			s.Focus == PaneContent && s.SelectedItem() != nil {
-			return "new"
-		}
-	case "d":
-		if s.Focus == PaneItems && len(s.Filtered()) > 0 ||
-			s.Focus == PaneChanges && len(s.ChangesList()) > 0 ||
-			s.Focus == PaneFolders && s.FilterFolder > 0 &&
-				s.FilterFolder <= len(s.Folders) ||
-			s.Focus == PaneContent && s.CurrentField() != nil && s.CurrentField().Custom {
-			return "delete"
-		}
-	case "e":
-		if s.Focus == PaneContent && s.CurrentField() != nil &&
-			!isCheckboxField(s.CurrentField()) {
-			return "edit"
-		}
-	case "c":
-		if s.Focus == PaneContent && s.CurrentField() != nil && !s.CurrentField().Restricted {
-			return "copy"
-		}
-	case "r":
-		if s.Focus == PaneContent && s.CurrentField() != nil &&
-			s.CurrentField().Hidden && !s.CurrentField().Restricted {
-			return "reveal"
-		}
-	case "s":
-		if s.Focus == PaneChanges && s.Stage.Len() > 0 && s.ServerConnected && !s.ImportedChangeAt(s.ChangeIndex) {
-			return "push"
-		}
-		if s.Focus == PaneContent && isCheckboxField(s.CurrentField()) {
-			return "switch"
-		}
+	if a.textEntryActive() && utf8.RuneCountInString(key) == 1 {
+		return "type"
 	}
 	return "unbound"
 }

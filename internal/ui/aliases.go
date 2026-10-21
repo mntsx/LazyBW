@@ -32,20 +32,64 @@ func (a *App) configuredBindings() map[string][]configuredBinding {
 	byKey := make(map[string][]configuredBinding)
 	for section, actions := range config.DefaultKeybinds {
 		for action := range actions {
+			boundAction, visible := a.localFocusAction(section, action)
+			if !visible {
+				continue
+			}
 			keys := a.S.Config.Keys(section, action)
-			handler := a.configuredShortcut(section, action)
+			handler := a.configuredShortcut(section, boundAction)
 			if handler == nil {
 				continue
 			}
 			for _, name := range keys {
 				name = normalizedBindingKey(name)
 				if name != "" {
-					byKey[name] = append(byKey[name], configuredBinding{section, action, handler})
+					byKey[name] = append(byKey[name], configuredBinding{section, boundAction, handler})
 				}
 			}
 		}
 	}
 	return byKey
+}
+
+// localFocusAction compacts the rendered local panels into the first four
+// configured global focus slots. It deliberately remaps semantic actions, not
+// key literals, so a user's keybinds.jsonc remains the source of every key.
+func (a *App) localFocusAction(section, action string) (string, bool) {
+	if !a.S.LocalMode || section != "global" {
+		return action, true
+	}
+	switch action {
+	case "focus_my_vault":
+		return "focus_item_types", true
+	case "focus_item_types":
+		return "focus_folders", true
+	case "focus_folders":
+		return "focus_items", true
+	case "focus_changes":
+		return "focus_content", true
+	case "focus_items", "focus_content":
+		return "", false
+	default:
+		return action, true
+	}
+}
+
+// localFocusSlotAction returns the configured global slot assigned to a local
+// panel target. It is the inverse of localFocusAction and never chooses a key.
+func localFocusSlotAction(action string) string {
+	switch action {
+	case "focus_item_types":
+		return "focus_my_vault"
+	case "focus_folders":
+		return "focus_item_types"
+	case "focus_items":
+		return "focus_folders"
+	case "focus_content":
+		return "focus_changes"
+	default:
+		return ""
+	}
 }
 
 func (a *App) dispatchConfiguredKey(name string) (bool, error) {
@@ -55,10 +99,14 @@ func (a *App) dispatchConfiguredKey(name string) (bool, error) {
 			continue
 		}
 		before := a.feedbackState()
-		deferredSubmit := name == "enter" && configuredSubmitAction(binding.action) &&
+		// Enter is a terminal transport event with special submit-flash handling.
+		// It does not assign an action: binding.action still comes exclusively
+		// from Config.Keys / DefaultKeybinds.
+		isTerminalEnter := name == terminalEnterLabel
+		deferredSubmit := isTerminalEnter && configuredSubmitAction(binding.action) &&
 			a.keyboardSubmitTarget() != submitFlashNone && a.gui != nil
 		var err error
-		if name == "enter" && configuredSubmitAction(binding.action) {
+		if isTerminalEnter && configuredSubmitAction(binding.action) {
 			err = a.keyboardEnter()
 		} else {
 			err = binding.fn()
@@ -90,18 +138,11 @@ func configuredSubmitAction(action string) bool {
 }
 
 // bindAliases registers configured keys that have no native editing callback.
-// Native keys call dispatchConfiguredKey themselves before their text fallback.
+// The native set below owns gocui event transport only; it must never define
+// defaults or behavior for a user-facing shortcut. Those live in DefaultKeybinds.
 func (a *App) bindAliases(g *gocui.Gui) error {
-	native := map[string]bool{
-		"up": true, "down": true, "left": true, "right": true,
-		"enter": true, "ctrl+j": true, "escape": true, "esc": true, "backspace": true,
-		"delete": true, "home": true, "end": true, "tab": true,
-		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
-		"ctrl+r": true, "ctrl+b": true, "ctrl+w": true, "ctrl+n": true,
-		"ctrl+z": true, "ctrl+y": true, "ctrl+c": true, "ctrl+v": true,
-	}
 	for name := range a.configuredBindings() {
-		if native[name] {
+		if nativeTerminalLabel(name) {
 			continue
 		}
 		key, ok := parseKey(name)
@@ -262,7 +303,8 @@ func (a *App) aliasAvailable(section, action string) bool {
 	return false
 }
 
-// configuredShortcut resolves a keymap action to its existing UI transition.
+// configuredShortcut resolves semantic configured actions. Never simulate a
+// legacy key here: DefaultKeybinds is the sole source of key combinations.
 func (a *App) configuredShortcut(section, action string) func() error {
 	switch action {
 	case "next", "previous":
@@ -296,30 +338,30 @@ func (a *App) configuredShortcut(section, action string) func() error {
 	case "hint_next_page":
 		return func() error { a.nextHintPage(); return nil }
 	case "next_page":
-		return func() error { return a.char('?') }
+		return a.nextPopupPage
 	case "soft_sync":
-		return func() error { return a.char('s') }
+		return func() error { return a.chooseRemoteSync(0) }
 	case "hard_sync":
-		return func() error { return a.char('h') }
+		return func() error { return a.chooseRemoteSync(1) }
 	case "abort":
-		return func() error { return a.char('a') }
+		return func() error { return a.chooseRemoteSync(2) }
 	case "accept":
-		return func() error { return a.char('y') }
+		return func() error { return a.setPopupConfirmation(true) }
 	case "reject":
-		return func() error { return a.char('n') }
+		return func() error { return a.setPopupConfirmation(false) }
 	case "favorite":
-		return func() error { return a.char('f') }
+		return a.toggleFavorite
 	case "switch":
-		return func() error {
-			if section == "content" {
-				return a.S.SwitchCheckbox()
-			}
-			return a.char('s')
+		if section == "content" {
+			return a.S.SwitchCheckbox
 		}
+		return a.toggleFolderChoice
 	case "new", "new_field":
-		return func() error { return a.char('n') }
-	case "delete", "delete_field", "discard":
-		return func() error { return a.char('d') }
+		return a.createWorkspaceItem
+	case "delete", "delete_field":
+		return a.deleteWorkspaceItem
+	case "discard":
+		return func() error { a.confirmStage(false, false); return nil }
 	case "cut":
 		if section == "detail" {
 			return a.cutEditorSelection
@@ -329,16 +371,16 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		if section == "detail" {
 			return a.copyEditorSelection
 		}
-		return func() error { return a.char('c') }
+		return a.copyCurrentField
 	case "reveal":
 		if section == "detail" {
 			return a.toggleAuthVisibility
 		}
-		return func() error { return a.char('r') }
+		return a.revealCurrentField
 	case "edit", "open_detail":
 		return func() error { return a.S.BeginEdit() }
 	case "search":
-		return func() error { return a.char('f') }
+		return a.startSearch
 	case "newline":
 		return func() error { a.S.Insert('\n'); return nil }
 	case "maximize":
@@ -488,6 +530,9 @@ func (a *App) focusConfiguredPane(pane Pane) error {
 	return nil
 }
 
+// parseKey decodes the JSONC key notation into gocui transport events. Its
+// key names are syntax, never shortcut defaults or action assignments; those
+// are defined only by config.DefaultKeybinds and Config.Keys.
 func parseKey(s string) (interface{}, bool) {
 	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {
 		r := s[5]
@@ -510,19 +555,6 @@ func parseKey(s string) (interface{}, bool) {
 		return gocui.KeyEsc, true
 	case "tab":
 		return gocui.KeyTab, true
-	case "ctrl+q":
-		return gocui.KeyCtrlQ, true
-	case "ctrl+s":
-		return gocui.KeyCtrlS, true
-	case "ctrl+p":
-		return gocui.KeyCtrlP, true
-	case "ctrl+d":
-		return gocui.KeyCtrlD, true
-	case "ctrl+r":
-		return gocui.KeyCtrlR, true
-	case "ctrl+b":
-		return gocui.KeyCtrlB, true
-
 	}
 	if utf8.RuneCountInString(s) == 1 {
 		r, _ := utf8.DecodeRuneInString(s)

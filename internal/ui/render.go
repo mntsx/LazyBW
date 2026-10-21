@@ -1143,8 +1143,8 @@ func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 }
 
 // PaginateHints keeps each complete hint within 75% of the full footer width.
-// The ? control appears on both the end of the first page and the beginning
-// of every subsequent page.
+// The configured pagination control appears on both the end of the first page
+// and the beginning of every subsequent page.
 func PaginateHints(hints []string, maxWidth int) [][]string {
 	if maxWidth < 10 {
 		maxWidth = 10
@@ -1153,7 +1153,7 @@ func PaginateHints(hints []string, maxWidth int) [][]string {
 		return [][]string{{}}
 	}
 	width := func(hint string) int { return utf8.RuneCountInString(hint) + 3 }
-	marker := "? ..."
+	marker := defaultHintPageMarker()
 	pages := [][]string{}
 	for next := 0; next < len(hints); {
 		page := []string{}
@@ -1206,8 +1206,8 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 		page := append([]string(nil), pages[s.HintPage%len(pages)]...)
 		if a.textEntryActive() {
 			for i, hint := range page {
-				if hint == "? ..." {
-					page[i] = "ctrl+n ..."
+				if hint == defaultHintPageMarker() {
+					page[i] = a.paginationHint(true)
 				}
 			}
 		}
@@ -1217,8 +1217,10 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 			if off >= limit {
 				break
 			}
-			if hint == "? ..." || hint == "ctrl+n ..." {
-				c.Text(startX+off, y, hint, CHintKey, CDefault)
+			if hint == defaultHintPageMarker() || hint == a.paginationHint(true) {
+				rendered := a.paginationHint(a.textEntryActive())
+				c.Text(startX+off, y, rendered, CHintKey, CDefault)
+				hint = rendered
 			} else {
 				parts := strings.SplitN(hint, " ", 2)
 				c.Text(startX+off, y, parts[0], CHintKey, CDefault)
@@ -1324,158 +1326,149 @@ func panelNavigationHints(s *State) []string {
 	keys := make([]string, 0, len(panes)-1)
 	for _, pane := range panes {
 		if pane != s.Focus {
-			if key := s.Config.Key("global", actions[pane]); key != "" {
-				keys = append(keys, hintLabel(key))
+			action := actions[pane]
+			if s.LocalMode {
+				action = localFocusSlotAction(action)
+			}
+			bindings := s.Config.Keys("global", action)
+			if len(bindings) > 0 && bindings[0] != "" {
+				keys = append(keys, hintLabel(bindings[0]))
 			}
 		}
 	}
 	out := []string{strings.Join(keys, "/") + " panels"}
 	if s.Focus != PaneItems {
-		if key := s.Config.Key("global", actions[s.Focus]); key != "" {
-			out = append(out, hintLabel(key)+" return")
+		action := actions[s.Focus]
+		if s.LocalMode {
+			action = localFocusSlotAction(action)
+		}
+		bindings := s.Config.Keys("global", action)
+		if len(bindings) > 0 && bindings[0] != "" {
+			out = append(out, hintLabel(bindings[0])+" return")
 		}
 	}
 	return out
 }
 
+// baseHints contains semantic actions only. Never place a literal key here:
+// defaults must be added to config.DefaultKeybinds so keybinds.jsonc is created
+// and completed with the same values, then rendered via Config.Keys.
 func (a *App) baseHints() []string {
 	s := a.S
 	if s.Popup != nil {
 		if s.Popup.Blocking {
 			return nil // a blocking modal has no available keybindings
 		}
-		if s.Popup.Acknowledge {
-			return []string{"ENTER OK", "esc close"}
+		section := "confirmation_popup"
+		specs := []hintSpec{
+			combinedHint(section, "choose", "button_left", "button_right"),
+			hint(section, "accept", "yes"), hint(section, "reject", "no"),
+			hint(section, "confirm", "confirm"), hint(section, "cancel", "cancel"),
 		}
-		h := []string{"←/→ choose", "y yes", "n no", "ENTER confirm", "c cancel", "esc close"}
-		if s.Popup.RemoteReview != nil {
+		if s.Popup.Acknowledge {
+			specs = []hintSpec{hint(section, "confirm", "OK"), hint(section, "cancel", "close")}
+		} else if s.Popup.RemoteReview != nil {
+			section = "sync_popup"
+			specs = []hintSpec{combinedHint(section, "choose", "button_left", "button_right")}
 			if s.Stage.Len() == 0 {
-				h = []string{"←/→ choose", "s sync", "a abort sync", "ENTER select", "esc close"}
+				specs = append(specs, hint(section, "soft_sync", "sync"))
 			} else {
-				h = []string{"←/→ choose", "s soft sync", "h hard sync", "a abort sync", "ENTER select", "esc close"}
+				specs = append(specs, hint(section, "soft_sync", "soft sync"), hint(section, "hard_sync", "hard sync"))
 			}
+			specs = append(specs, hint(section, "abort", "abort sync"), hint(section, "confirm", "select"))
 		}
 		pageSize := 10
 		if s.Popup.RemoteReview != nil {
 			pageSize = a.reviewPageSize()
 		}
 		if len(s.Popup.Lines) > pageSize {
-			h = append(h, "? next page")
+			specs = append(specs, hint(section, "next_page", "next page"))
 		}
-		return h
+		return a.renderHints(specs)
 	}
+
 	switch s.Mode {
-	case DialogCreate, DialogFieldType, DialogWebsite, DialogLinkedChoice,
-		DialogCardBrand, DialogIdentityTitle:
-		return []string{"↑/↓ move", "ENTER select", "esc cancel"}
+	case DialogCreate, DialogFieldType, DialogWebsite, DialogLinkedChoice, DialogCardBrand, DialogIdentityTitle:
+		section := map[Mode]string{DialogCreate: "create_item_popup", DialogFieldType: "create_field_popup", DialogWebsite: "website_popup", DialogLinkedChoice: "linked_field_popup", DialogCardBrand: "card_brand_popup", DialogIdentityTitle: "identity_title_popup"}[s.Mode]
+		return a.renderHints([]hintSpec{combinedHint(section, "move", "previous", "next"), hint(section, "confirm", "select"), hint(section, "cancel", "cancel")})
 	case DialogFoldersChoice:
-		return []string{"↑/↓ move", "s switch", "ENTER apply", "esc cancel"}
+		return a.renderHints([]hintSpec{combinedHint("folder_selector_popup", "move", "previous", "next"), hint("folder_selector_popup", "switch", "switch"), hint("folder_selector_popup", "confirm", "apply"), hint("folder_selector_popup", "cancel", "cancel")})
 	case DialogName, DialogField, DialogFolder:
-		return []string{"↑/↓ move", "←/→ move", "ENTER select", "esc cancel"}
+		section := "name_popup"
+		if s.Mode == DialogFolder {
+			section = "folder_popup"
+		}
+		return a.renderHints([]hintSpec{combinedHint(section, "move", "previous", "next"), combinedHint(section, "move", "button_left", "button_right"), hint(section, "confirm", "select"), hint(section, "cancel", "cancel")})
+	case DialogReprompt:
+		return a.renderHints([]hintSpec{hint("reprompt_popup", "reveal_password", "reveal"), hint("reprompt_popup", "confirm", "verify"), hint("reprompt_popup", "cancel", "cancel")})
 	}
-	if s.Mode == DialogReprompt {
-		return []string{"ctrl+r reveal", "ENTER verify", "esc cancel"}
-	}
-	h := []string{}
+
+	specs := []hintSpec{}
 	if s.Mode != Edit {
-		h = append(h, "ctrl+q quit")
+		specs = append(specs, hint("global", "quit", "quit"))
 		if !s.LocalMode && s.ServerConnected {
-			h = append(h, "ctrl+s sync")
+			specs = append(specs, hint("global", "sync", "sync"))
 		}
 		if !s.LocalMode && s.Stage.Len() > 0 {
 			if s.ServerConnected {
-				h = append(h, "ctrl+p push all")
+				specs = append(specs, hint("global", "push_all", "push all"))
 			}
-			h = append(h, "ctrl+d discard all")
+			specs = append(specs, hint("global", "discard_all", "discard all"))
 		}
 	}
+	out := a.renderHints(specs)
 	if s.Mode == Browse {
-		h = append(h, panelNavigationHints(s)...)
+		out = append(out, panelNavigationHints(s)...)
 	}
+
+	specs = nil
 	switch {
 	case s.Mode == Find:
-		h = append(h, "ENTER apply", "esc back")
+		specs = []hintSpec{hint("search", "apply", "apply"), hint("search", "leave", "back")}
 	case s.Mode == Edit:
-		h = append(h,
-			a.configuredHint("detail", "save", "apply"),
-			a.configuredHint("detail", "back", "cancel"),
-		)
-		wrapLabel := "wrap"
-		if s.InputWrap {
-			wrapLabel = "unwrap"
-		}
-		maximizeLabel := "expand"
-		if s.DetailMaximized {
-			maximizeLabel = "enclose"
-		}
-		h = append(h,
-			a.configuredHint("detail", "maximize", maximizeLabel),
-			a.configuredHint("detail", "wrap", wrapLabel),
-			a.configuredHint("detail", "newline", "newline"),
-			a.configuredHint("detail", "undo", "undo"),
-			a.configuredHint("detail", "redo", "redo"),
-			a.configuredHint("detail", "cut", "cut"),
-			a.configuredHint("detail", "copy", "copy"),
-			a.configuredHint("detail", "paste", "paste"),
-		)
-		if s.InputSecret {
-			h = append(h, a.configuredHint("detail", "reveal", "reveal"))
-		}
+		wrapLabel, maximizeLabel := "wrap", "expand"
+		if s.InputWrap { wrapLabel = "unwrap" }
+		if s.DetailMaximized { maximizeLabel = "enclose" }
+		specs = []hintSpec{hint("detail", "save", "apply"), hint("detail", "back", "cancel"), hint("detail", "maximize", maximizeLabel), hint("detail", "wrap", wrapLabel), hint("detail", "newline", "newline"), hint("detail", "undo", "undo"), hint("detail", "redo", "redo"), hint("detail", "cut", "cut"), hint("detail", "copy", "copy"), hint("detail", "paste", "paste")}
+		if s.InputSecret { specs = append(specs, hint("detail", "reveal", "reveal")) }
 	case s.Focus == PaneChanges:
-		h = append(h, "↑/↓ move")
-		if s.ServerConnected && !s.ImportedChangeAt(s.ChangeIndex) {
-			h = append(h, "s push")
-		}
-		if !s.ImportedChangeAt(s.ChangeIndex) {
-			h = append(h, "d discard")
-		}
+		specs = append(specs, combinedHint("edits", "move", "previous", "next"))
+		if s.ServerConnected && !s.ImportedChangeAt(s.ChangeIndex) { specs = append(specs, hint("edits", "save", "push")) }
+		if !s.ImportedChangeAt(s.ChangeIndex) { specs = append(specs, hint("edits", "discard", "discard")) }
 	case s.Focus == PaneContent:
-		h = append(h, "↑/↓ move")
+		specs = append(specs, combinedHint("content", "move", "previous", "next"))
 		item, field := s.SelectedItem(), s.CurrentField()
 		if !s.LocalMode && item != nil && item.CanEdit() {
-			h = append(h, "f favourite")
+			specs = append(specs, hint("content", "favorite", "favourite"))
 			if field != nil && field.Editable {
-				if isCheckboxField(field) {
-					h = append(h, "s switch")
-				} else {
-					h = append(h, "e edit")
-				}
+				action := "edit"; verb := "edit"
+				if isCheckboxField(field) { action, verb = "switch", "switch" }
+				specs = append(specs, hint("content", action, verb))
 			}
-			h = append(h, "n new")
-			if field != nil && field.Custom && field.Editable {
-				h = append(h, "d delete")
-			}
+			specs = append(specs, hint("content", "new_field", "new"))
+			if field != nil && field.Custom && field.Editable { specs = append(specs, hint("content", "delete_field", "delete")) }
 		}
 		if field != nil && !field.Restricted {
-			h = append(h, "c copy")
-			if field.Hidden {
-				h = append(h, "r reveal")
-			}
+			specs = append(specs, hint("content", "copy", "copy"))
+			if field.Hidden { specs = append(specs, hint("content", "reveal", "reveal")) }
 		}
-		h = append(h, "← back")
+		specs = append(specs, hint("content", "back", "back"))
 	case s.Focus == PaneFolders:
-		enterHint := "ENTER select"
-		if s.Filters[2] >= 0 && s.Filters[2] == s.FilterFolder {
-			enterHint = "ENTER unselect"
-		}
-		h = append(h, "↑/↓ move", enterHint)
+		verb := "select"
+		if s.Filters[2] >= 0 && s.Filters[2] == s.FilterFolder { verb = "unselect" }
+		specs = append(specs, combinedHint("folders", "move", "previous", "next"), hint("folders", "select", verb))
 		if !s.LocalMode {
-			h = append(h, "n new")
-			if s.Filters[2] > 0 && s.Filters[2] <= len(s.Folders) {
-				h = append(h, "d delete")
-			}
+			specs = append(specs, hint("folders", "new", "new"))
+			if s.Filters[2] > 0 && s.Filters[2] <= len(s.Folders) { specs = append(specs, hint("folders", "delete", "delete")) }
 		}
 	case s.Focus >= PaneVault && s.Focus <= PaneTypes:
-		h = append(h, "↑/↓ move", "ENTER select")
+		specs = []hintSpec{combinedHint("filters", "move", "previous", "next"), hint("filters", "select", "select")}
 	case s.Focus == PaneItems:
-		if s.LocalMode {
-			h = append(h, "↑/↓ move", "→ open", "f find")
-		} else {
-			h = append(h, "↑/↓ move", "→ open", "f find", "n new")
-			if current := s.CurrentItem(); current != nil && current.CanEdit() {
-				h = append(h, "d delete")
-			}
+		specs = []hintSpec{combinedHint("items", "move", "previous", "next"), hint("items", "open", "open"), hint("items", "search", "find")}
+		if !s.LocalMode {
+			specs = append(specs, hint("items", "new", "new"))
+			if current := s.CurrentItem(); current != nil && current.CanEdit() { specs = append(specs, hint("items", "delete", "delete")) }
 		}
 	}
-	return h
+	return append(out, a.renderHints(specs)...)
 }
