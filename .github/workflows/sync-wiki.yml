@@ -1,0 +1,48 @@
+name: Sync documentation to wiki
+
+on:
+  push:
+    paths:
+      - assets/DOCUMENTATION.md
+      - assets/screenshots/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check out wiki
+        env:
+          # Set WIKI_TOKEN to a fine-grained PAT with Contents: Read and write
+          # access if the automatic token cannot write this repository's wiki.
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${WIKI_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki || {
+            echo "::error::Could not clone the wiki. Enable and initialize the repository wiki first; configure WIKI_TOKEN if GITHUB_TOKEN has no wiki write access."
+            exit 1
+          }
+
+      - name: Publish documentation and screenshots
+        run: |
+          cp assets/DOCUMENTATION.md wiki/Home.md
+          rm -rf wiki/screenshots
+          cp -R assets/screenshots wiki/screenshots
+
+      - name: Commit wiki changes
+        working-directory: wiki
+        run: |
+          if git diff --quiet; then
+            echo "Wiki is already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Home.md screenshots
+          git commit -m "Sync LazyBW documentation"
+          git push
