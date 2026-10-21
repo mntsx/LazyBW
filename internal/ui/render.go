@@ -464,13 +464,13 @@ func (a *App) mainRender(c *Canvas) {
 	}
 	a.itemX, a.itemW = middleStart, max(0, end-middleStart)
 	a.contentX, a.contentW = contentX, 0
-	a.detailX, a.detailY, a.detailH = 0, 0, 0
+	a.detailX, a.detailY, a.detailW, a.detailH = 0, 0, 0, 0
 	a.itemsPanel(c, middleStart, panelY, a.itemW, topH)
 	var sections []borderSection
 	if contentX > 0 {
 		contentWidth := w - contentX - 1
 		a.contentW = contentWidth
-		if s.Mode == Edit && !s.LocalMode {
+		if s.Mode == Edit && !s.LocalMode && !s.DetailMaximized {
 			// Details occupies the bottom of the very same right-hand column.
 			// Opening the editor never changes the width of Items or Content.
 			detailH := max(5, topH*35/100)
@@ -486,6 +486,7 @@ func (a *App) mainRender(c *Canvas) {
 			}
 			a.detailX = contentX
 			a.detailY = panelY + contentH + 1
+			a.detailW = contentWidth
 			a.detailH = detailH
 			a.contentPanel(c, contentX, panelY, contentWidth, contentH)
 			a.detailPanel(c, contentX, a.detailY, contentWidth, detailH)
@@ -1065,6 +1066,29 @@ func inputLengthCounter(value string, encryptedLimit int) (string, int, bool) {
 	return fmt.Sprintf("UTF-8 bytes %d/%d", len(value), maximum), color, true
 }
 
+func (a *App) detailAllowsNewlines() bool {
+	f := a.S.CurrentField()
+	return f != nil && (strings.EqualFold(f.Name, "notes") || f.Custom && f.FieldType == 0)
+}
+
+// detailPopupRender draws the active editor as a centered presentation of the
+// same State buffer. It intentionally does not use State.Popup, which would
+// disable the normal detail keymap and text entry.
+func (a *App) detailPopupRender(c *Canvas) {
+	outerW := min(max(24, c.W*60/100), max(3, c.W-4))
+	outerH := 7 // Outline plus title, rule, centered text and bottom padding.
+	if a.detailAllowsNewlines() {
+		outerH = min(max(8, c.H*65/100), max(6, c.H-4))
+	}
+	outerX := max(0, (c.W-outerW)/2)
+	outerY := max(1, (c.H-outerH)/2)
+	drawDialogBorder(c, outerX, outerY, outerW, outerH)
+	a.detailX, a.detailY = outerX+1, outerY+1
+	a.detailW, a.detailH = outerW-2, outerH-2
+	a.detailPanel(c, a.detailX, a.detailY, a.detailW, a.detailH)
+}
+
+
 func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 	s := a.S
 	if s.Mode != Edit {
@@ -1352,18 +1376,21 @@ func (a *App) baseHints() []string {
 	if s.Mode == DialogReprompt {
 		return []string{"ctrl+r reveal", "ENTER verify", "esc cancel"}
 	}
-	h := []string{"ctrl+q quit"}
-	if !s.LocalMode && s.ServerConnected {
-		h = append(h, "ctrl+s sync")
+	h := []string{}
+	if s.Mode != Edit {
+		h = append(h, "ctrl+q quit")
+		if !s.LocalMode && s.ServerConnected {
+			h = append(h, "ctrl+s sync")
+		}
+		if !s.LocalMode && s.Stage.Len() > 0 {
+			if s.ServerConnected {
+				h = append(h, "ctrl+p push all")
+			}
+			h = append(h, "ctrl+d discard all")
+		}
 	}
 	if s.Mode == Browse {
 		h = append(h, panelNavigationHints(s)...)
-	}
-	if !s.LocalMode && s.Stage.Len() > 0 {
-		if s.ServerConnected {
-			h = append(h, "ctrl+p push all")
-		}
-		h = append(h, "ctrl+d discard all")
 	}
 	switch {
 	case s.Mode == Find:
@@ -1377,7 +1404,12 @@ func (a *App) baseHints() []string {
 		if s.InputWrap {
 			wrapLabel = "unwrap"
 		}
+		maximizeLabel := "expand"
+		if s.DetailMaximized {
+			maximizeLabel = "enclose"
+		}
 		h = append(h,
+			a.configuredHint("detail", "maximize", maximizeLabel),
 			a.configuredHint("detail", "wrap", wrapLabel),
 			a.configuredHint("detail", "newline", "newline"),
 			a.configuredHint("detail", "undo", "undo"),

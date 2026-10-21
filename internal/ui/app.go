@@ -40,8 +40,9 @@ type App struct {
 	itemScroll, contentScroll                 int
 	sideScroll                                [4]int
 	itemX, itemW, contentX, contentW, detailX int
-	renderWidth, renderHeight                 int
-	detailY, detailH                          int
+	detailW                                    int
+	renderWidth, renderHeight                  int
+	detailY, detailH                           int
 	terminalBS                                byte
 	nativeWordKeys                            []terminalkeys.Binding
 	submitFlash                               submitFlashTarget
@@ -377,6 +378,9 @@ func (a *App) layout(g *gocui.Gui) error {
 	}
 	if a.S.Popup != nil {
 		a.popupRender(c)
+	}
+	if a.S.Screen == Workspace && a.S.Mode == Edit && a.S.DetailMaximized {
+		a.detailPopupRender(c)
 	}
 	if a.S.Mode == DialogServer &&
 		(a.S.Screen == AuthClient || a.S.Screen == AuthMaster || a.S.Screen == AuthOffline) {

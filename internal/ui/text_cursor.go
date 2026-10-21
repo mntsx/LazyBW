@@ -158,10 +158,10 @@ func (a *App) editCaretPoint(width, height int) (int, int, bool) {
 		_, col := visibleText(s.Input, s.Caret, w-8)
 		return x + col, y, true
 	case Edit:
-		if a.detailH < 5 {
+		if a.detailH < 4 || a.detailW < 5 {
 			return 0, 0, false
 		}
-		_, line, col := detailDisplayLines(s.Input, s.Caret, a.contentW-4, s.InputWrap)
+		_, line, col := detailDisplayLines(s.Input, s.Caret, a.detailW-4, s.InputWrap)
 		startLine := max(0, line-(a.detailH-4))
 		return a.detailX + 2 + col, a.detailY + 3 + line - startLine, true
 	}

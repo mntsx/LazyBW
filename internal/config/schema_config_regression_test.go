@@ -39,7 +39,8 @@ func TestGeneratedJSONCIsAnnotatedAndListsEveryContext(t *testing.T) {
 	}
 	if !strings.Contains(string(file), `"select_all": [`) ||
 		!strings.Contains(string(file), `"ctrl+a"`) ||
-		cfg.Key("detail", "select_all") != "ctrl+a" || cfg.Key("detail", "cut") != "ctrl+x" {
+		cfg.Key("detail", "select_all") != "ctrl+a" || cfg.Key("detail", "cut") != "ctrl+x" ||
+		cfg.Key("detail", "maximize") != "ctrl+e" {
 		t.Fatal("detail select-all default is absent or incorrect")
 	}
 	if cfg.Key("text_input", "delete_backward") != "backspace" ||

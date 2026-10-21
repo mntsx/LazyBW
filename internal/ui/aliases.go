@@ -180,13 +180,13 @@ func (a *App) aliasAvailable(section, action string) bool {
 		return s.Mode == mode
 	}
 	if section == "global" && action == "sync" {
-		return s.Screen == Workspace && !s.LocalMode && s.ServerConnected
+		return s.Screen == Workspace && s.Mode != Edit && !s.LocalMode && s.ServerConnected
 	}
 	if section == "global" && action == "hint_next_page" {
 		return true
 	}
 	if section == "global" && action == "quit" {
-		return !a.modalOpen()
+		return s.Mode != Edit && !a.modalOpen()
 	}
 	if s.Screen != Workspace || s.Mode != Browse {
 		return false
@@ -341,6 +341,8 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { return a.char('f') }
 	case "newline":
 		return func() error { a.S.Insert('\n'); return nil }
+	case "maximize":
+		return func() error { a.S.DetailMaximized = !a.S.DetailMaximized; return nil }
 	case "wrap":
 		return func() error { a.S.InputWrap = !a.S.InputWrap; return nil }
 	case "undo":
@@ -588,7 +590,7 @@ func aliasActionName(section, action string) string {
 		return "next page"
 	case "newline":
 		return "newline"
-	case "wrap", "undo", "redo", "cut", "paste", "select_all":
+	case "maximize", "wrap", "undo", "redo", "cut", "paste", "select_all":
 		return action
 	case "cursor_up", "cursor_down", "cursor_left", "cursor_right",
 		"cursor_start", "cursor_end", "word_previous", "word_next",

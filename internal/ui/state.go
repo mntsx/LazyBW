@@ -118,6 +118,7 @@ type State struct {
 	Input                              string
 	Caret                              int
 	InputWrap                          bool
+	DetailMaximized                    bool
 	SelectionAnchor                    int
 	editUndo, editRedo                 []editorSnapshot
 	InputSecret                        bool
@@ -520,7 +521,7 @@ func (s *State) BeginTextEdit() error {
 	s.EditPath = append([]any(nil), f.Path...)
 	s.Mode = Edit
 	s.Focus = PaneDetail
-	s.InputWrap = false
+	s.InputWrap, s.DetailMaximized = false, false
 	s.InputSecret = f.Hidden
 	s.InputEncryptedLimit = f.EncryptedLimit
 	// Content and Details share the visibility of this specific hidden field.
@@ -555,6 +556,7 @@ func (s *State) BeginEditWebsite(index int) error {
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = path, false
 	s.Mode, s.Focus, s.InputWrap, s.InputSecret = Edit, PaneDetail, false, false
+	s.DetailMaximized = false
 	s.InputEncryptedLimit = vault.Schema().WebsiteField.EncryptedLimit
 	return nil
 }
@@ -564,7 +566,7 @@ func (s *State) BeginNewWebsite() {
 	s.Input, s.EditorOriginal, s.Caret = "", "", 0
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = nil, true
-	s.InputWrap, s.InputSecret, s.Mode, s.Focus = false, false, Edit, PaneDetail
+	s.InputWrap, s.InputSecret, s.Mode, s.Focus, s.DetailMaximized = false, false, Edit, PaneDetail, false
 	s.InputEncryptedLimit = vault.Schema().WebsiteField.EncryptedLimit
 }
 
@@ -664,7 +666,7 @@ func (s *State) ExitEdit() {
 	s.Focus = PaneContent
 	s.Input = ""
 	s.EditorOriginal = ""
-	s.InputWrap = false
+	s.InputWrap, s.DetailMaximized = false, false
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.InputSecret = false
 	s.InputEncryptedLimit = 0

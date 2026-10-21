@@ -214,7 +214,7 @@ var DefaultKeybinds = map[string]map[string][]string{
 	"detail": {
 		"back": {"escape"}, "save": {"enter"},
 		"newline": {"ctrl+j"}, "reveal": {"ctrl+r"},
-		"wrap": {"ctrl+w"}, "undo": {"ctrl+z"}, "redo": {"ctrl+y"},
+		"maximize": {"ctrl+e"}, "wrap": {"ctrl+w"}, "undo": {"ctrl+z"}, "redo": {"ctrl+y"},
 		"cut": {"ctrl+x"}, "copy": {"ctrl+c"}, "paste": {"ctrl+v"}, "select_all": {"ctrl+a"},
 		"cursor_up": {"up"}, "cursor_down": {"down"},
 		"cursor_left": {"left"}, "cursor_right": {"right"},
