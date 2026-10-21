@@ -37,12 +37,14 @@ jobs:
       - name: Commit wiki changes
         working-directory: wiki
         run: |
-          if git diff --quiet; then
+          git add -A -- Home.md screenshots
+
+          if git diff --cached --quiet; then
             echo "Wiki is already up to date"
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Home.md screenshots
           git commit -m "Sync LazyBW documentation"
           git push
