@@ -49,12 +49,9 @@ func Run(ctx context.Context, cfg config.Config, cli *bitwarden.Client, options 
 	}
 	region := config.NormalizeServer(cfg.Authentication.DefaultServer)
 	options.report("Checking Bitwarden session...")
-	if err := cli.ConfigureRegion(ctx, cfg.Directory, region); err != nil {
-		return fmt.Errorf("configure Bitwarden region: %w", err)
-	}
-	status, err := cli.Status(ctx)
+	status, err := cli.ConfigureRegionStatus(ctx, cfg.Directory, region)
 	if err != nil {
-		return fmt.Errorf("check Bitwarden session: %w", err)
+		return fmt.Errorf("configure Bitwarden region: %w", err)
 	}
 	state := fmt.Sprint(status["status"])
 	if state != "unauthenticated" && state != "locked" && state != "unlocked" {
@@ -69,7 +66,12 @@ func Run(ctx context.Context, cfg config.Config, cli *bitwarden.Client, options 
 		if id == "" || secret == "" {
 			return errors.New("client credentials file lacks BW_CLIENTID or BW_CLIENTSECRET")
 		}
-		if err = cli.Login(ctx, id, secret); err != nil {
+		if state == "unauthenticated" {
+			err = cli.LoginUnauthenticated(ctx, id, secret)
+		} else {
+			err = cli.Login(ctx, id, secret)
+		}
+		if err != nil {
 			return fmt.Errorf("sign in to Bitwarden: %w", err)
 		}
 	}

@@ -139,9 +139,9 @@ func TestStartupAuthenticatesWithSavedKeyOnlyAtLaunch(t *testing.T) {
 	if state.Screen != AuthMaster || !runner.credentialsCorrect {
 		t.Fatalf("automatic login failed: screen=%v, accepted=%v", state.Screen, runner.credentialsCorrect)
 	}
-	if len(runner.calls) < 3 || strings.Join(runner.calls[:3], "|") !=
-		"status|--version|login --apikey" {
-		t.Fatalf("startup should reuse its verified unauthenticated profile: %v", runner.calls)
+	if len(runner.calls) < 2 || strings.Join(runner.calls[:2], "|") !=
+		"--version|login --apikey" {
+		t.Fatalf("startup should trust its newly created unauthenticated profile: %v", runner.calls)
 	}
 	for _, cmd := range runner.calls {
 		if cmd == "login --apikey" {

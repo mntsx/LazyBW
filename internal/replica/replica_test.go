@@ -117,6 +117,9 @@ func TestRunCreatesLatestPersonalReplica(t *testing.T) {
 			t.Fatalf("missing %q in calls:\n%s", expected, calls)
 		}
 	}
+	if strings.Contains(calls, "status") {
+		t.Fatalf("a new replication profile must not recheck its known status:\n%s", calls)
+	}
 }
 
 func TestExplicitClientOverridesLockedProfile(t *testing.T) {
@@ -144,8 +147,11 @@ func TestExplicitClientOverridesLockedProfile(t *testing.T) {
 	runner.mu.Lock()
 	calls := strings.Join(runner.calls, "\n")
 	runner.mu.Unlock()
-	if !strings.Contains(calls, "logout") || !strings.Contains(calls, "login --apikey") {
-		t.Fatalf("explicit credentials did not replace locked profile:\n%s", calls)
+	if !strings.Contains(calls, "login --apikey") {
+		t.Fatalf("explicit credentials did not authenticate the profile:\n%s", calls)
+	}
+	if strings.Contains(calls, "status") || strings.Contains(calls, "logout") {
+		t.Fatalf("a new override profile must not probe or log out first:\n%s", calls)
 	}
 }
 

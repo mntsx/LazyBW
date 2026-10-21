@@ -119,19 +119,26 @@ func overriddenEnvironment(inherited, overrides []string) []string {
 }
 
 type Client struct {
-	runner        Runner
-	mu            sync.Mutex
-	sessionSealed *vault.Sealed
-	mode          BackendMode
-	serve         *BWServeBackend
-	repromptTag   [32]byte
-	repromptReady bool
-	version       string
-	versionReady  bool
-	profileDir    string
-	sessionDir    string
-	sessionLock   *os.File
-	Cipher        *vault.Cipher
+	runner         Runner
+	mu             sync.Mutex
+	sessionSealed  *vault.Sealed
+	mode           BackendMode
+	serve          *BWServeBackend
+	repromptTag    [32]byte
+	repromptReady  bool
+	version        string
+	versionReady   bool
+	versionWait    chan struct{}
+	versionErr     error
+	serveHelpReady bool
+	serveHostname  bool
+	serveHelpWait  chan struct{}
+	serveHelpErr   error
+	profileStatus  map[string]map[string]any
+	profileDir     string
+	sessionDir     string
+	sessionLock    *os.File
+	Cipher         *vault.Cipher
 }
 
 func NewClient(r Runner) (*Client, error) {
@@ -142,7 +149,10 @@ func NewClient(r Runner) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{runner: r, Cipher: c, mode: BackendBW, serve: &BWServeBackend{}}, nil
+	return &Client{
+		runner: r, Cipher: c, mode: BackendBW, serve: &BWServeBackend{},
+		profileStatus: make(map[string]map[string]any),
+	}, nil
 }
 func (c *Client) call(ctx context.Context, op string, args []string, input []byte, vars []string, session bool) ([]byte, error) {
 	c.mu.Lock()
@@ -267,7 +277,7 @@ func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region st
 	if c.BackendMode() == BackendBWServe && c.serve != nil {
 		_ = c.serve.Stop(ctx)
 	}
-	profile, err := c.sessionProfile(configDir, region)
+	profile, fresh, err := c.sessionProfile(configDir, region)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +286,23 @@ func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region st
 	c.clearSessionLocked()
 	c.repromptReady = false
 	c.repromptTag = [32]byte{}
+	known := cloneStatus(c.profileStatus[profile])
 	c.mu.Unlock()
+	if known != nil {
+		return known, nil
+	}
+	// A profile created in this private session has never been authenticated.
+	// US is the CLI default; EU only needs the direct endpoint write.
+	if fresh {
+		if region == "eu" {
+			if _, err := c.rawCLI(ctx, "config", "server", url); err != nil {
+				return nil, err
+			}
+		}
+		status := map[string]any{"status": "unauthenticated", "serverUrl": url}
+		c.setProfileStatus(profile, status)
+		return status, nil
+	}
 	b, err := c.rawCLI(ctx, "status")
 	if err != nil {
 		return nil, err
@@ -288,64 +314,73 @@ func (c *Client) ConfigureRegionStatus(ctx context.Context, configDir, region st
 	// Preserve an existing, correctly configured profile. Re-running
 	// `bw config server` on each launch needlessly writes the CLI data file
 	// and may discard custom service endpoints set by the CLI itself.
-	if current, ok := status["serverUrl"].(string); ok &&
-		strings.TrimRight(current, "/") == url {
+	if current, ok := status["serverUrl"].(string); ok && strings.TrimRight(current, "/") == url {
+		c.setProfileStatus(profile, status)
 		return status, nil
 	}
 	// Some CLI versions return an empty serverUrl for a fresh US profile.
 	// US is their built-in default and does not need reconfiguration.
-	if region == "us" && status["serverUrl"] == nil &&
-		status["status"] == "unauthenticated" {
+	if region == "us" && status["serverUrl"] == nil && status["status"] == "unauthenticated" {
+		c.setProfileStatus(profile, status)
 		return status, nil
 	}
 	// Never change the endpoint of a logged-in profile without first
 	// logging out; this is confined to LazyBW's isolated directory.
 	if status["status"] != "unauthenticated" {
 		if _, err := c.rawCLI(ctx, "logout"); err != nil {
+			c.invalidateProfileStatus(profile)
 			return nil, err
 		}
 	}
 	if _, err = c.rawCLI(ctx, "config", "server", url); err != nil {
+		c.invalidateProfileStatus(profile)
 		return nil, err
 	}
 	// A server change is permitted only after logout, or from an already
 	// unauthenticated profile. The successful command therefore leaves this
 	// private profile unauthenticated without another `bw status` process.
-	return map[string]any{"status": "unauthenticated", "serverUrl": url}, nil
+	status = map[string]any{"status": "unauthenticated", "serverUrl": url}
+	c.setProfileStatus(profile, status)
+	return status, nil
 }
 
-func (c *Client) sessionProfile(configDir, region string) (string, error) {
+func (c *Client) sessionProfile(configDir, region string) (string, bool, error) {
 	c.mu.Lock()
 	if c.sessionDir != "" {
 		sessionDir := c.sessionDir
 		c.mu.Unlock()
 		profile := filepath.Join(sessionDir, region)
+		_, statErr := os.Stat(profile)
+		fresh := errors.Is(statErr, os.ErrNotExist)
+		if statErr != nil && !fresh {
+			return "", false, fmt.Errorf("cannot inspect Bitwarden profile: %w", statErr)
+		}
 		if err := os.MkdirAll(profile, 0700); err != nil {
-			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+			return "", false, fmt.Errorf("cannot create Bitwarden profile: %w", err)
 		}
 		if err := os.Chmod(profile, 0700); err != nil {
-			return "", fmt.Errorf("cannot secure Bitwarden profile: %w", err)
+			return "", false, fmt.Errorf("cannot secure Bitwarden profile: %w", err)
 		}
-		return profile, nil
+		return profile, fresh, nil
 	}
 	c.mu.Unlock()
 
 	base, err := filepath.Abs(filepath.Join(configDir, "bitwarden", "sessions"))
 	if err != nil {
-		return "", fmt.Errorf("invalid Bitwarden session directory: %w", err)
+		return "", false, fmt.Errorf("invalid Bitwarden session directory: %w", err)
 	}
 	if err := os.MkdirAll(base, 0700); err != nil {
-		return "", fmt.Errorf("cannot create Bitwarden sessions directory: %w", err)
+		return "", false, fmt.Errorf("cannot create Bitwarden sessions directory: %w", err)
 	}
 	if err := os.Chmod(base, 0700); err != nil {
-		return "", fmt.Errorf("cannot secure Bitwarden sessions directory: %w", err)
+		return "", false, fmt.Errorf("cannot secure Bitwarden sessions directory: %w", err)
 	}
 	cleanupAbandonedSessions(base, time.Now())
 
 	for attempts := 0; attempts < 10; attempts++ {
 		var random [8]byte
 		if _, err := rand.Read(random[:]); err != nil {
-			return "", fmt.Errorf("cannot generate Bitwarden session ID: %w", err)
+			return "", false, fmt.Errorf("cannot generate Bitwarden session ID: %w", err)
 		}
 		id := fmt.Sprintf("%d-%d-%s", time.Now().UnixNano(), os.Getpid(), hex.EncodeToString(random[:]))
 		sessionDir := filepath.Join(base, id)
@@ -353,18 +388,18 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
-			return "", fmt.Errorf("cannot create Bitwarden session: %w", err)
+			return "", false, fmt.Errorf("cannot create Bitwarden session: %w", err)
 		}
 		lock, err := lockSession(sessionDir, false)
 		if err != nil {
 			_ = os.RemoveAll(sessionDir)
-			return "", fmt.Errorf("cannot lock Bitwarden session: %w", err)
+			return "", false, fmt.Errorf("cannot lock Bitwarden session: %w", err)
 		}
 		profile := filepath.Join(sessionDir, region)
 		if err := os.Mkdir(profile, 0700); err != nil {
 			releaseSessionLock(lock)
 			_ = os.RemoveAll(sessionDir)
-			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+			return "", false, fmt.Errorf("cannot create Bitwarden profile: %w", err)
 		}
 
 		c.mu.Lock()
@@ -372,7 +407,7 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 			c.sessionDir = sessionDir
 			c.sessionLock = lock
 			c.mu.Unlock()
-			return profile, nil
+			return profile, true, nil
 		}
 		activeSession := c.sessionDir
 		c.mu.Unlock()
@@ -380,14 +415,43 @@ func (c *Client) sessionProfile(configDir, region string) (string, error) {
 		_ = os.RemoveAll(sessionDir)
 		profile = filepath.Join(activeSession, region)
 		if err := os.MkdirAll(profile, 0700); err != nil {
-			return "", fmt.Errorf("cannot create Bitwarden profile: %w", err)
+			return "", false, fmt.Errorf("cannot create Bitwarden profile: %w", err)
 		}
-		return profile, nil
+		return profile, true, nil
 	}
-	return "", errors.New("cannot allocate unique Bitwarden session ID")
+	return "", false, errors.New("cannot allocate unique Bitwarden session ID")
 }
 
 // ServeRunning reports only the process owned by this client.
+func cloneStatus(status map[string]any) map[string]any {
+	if status == nil {
+		return nil
+	}
+	copy := make(map[string]any, len(status))
+	for key, value := range status {
+		copy[key] = value
+	}
+	return copy
+}
+
+func (c *Client) setProfileStatus(profile string, status map[string]any) {
+	c.mu.Lock()
+	c.profileStatus[profile] = cloneStatus(status)
+	c.mu.Unlock()
+}
+
+func (c *Client) invalidateProfileStatus(profile string) {
+	c.mu.Lock()
+	delete(c.profileStatus, profile)
+	c.mu.Unlock()
+}
+
+func (c *Client) currentProfileStatus() (string, map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.profileDir, cloneStatus(c.profileStatus[c.profileDir])
+}
+
 func (c *Client) ServeRunning() bool {
 	c.mu.Lock()
 	serve := c.serve
@@ -436,6 +500,10 @@ func (c *Client) SelectBackend(ctx context.Context, mode BackendMode) error {
 			return err
 		}
 	}
+	return c.selectBackend(ctx, mode)
+}
+
+func (c *Client) selectBackend(ctx context.Context, mode BackendMode) error {
 	previous := c.BackendMode()
 	if previous == mode {
 		return nil
@@ -450,8 +518,10 @@ func (c *Client) SelectBackend(ctx context.Context, mode BackendMode) error {
 	c.mu.Lock()
 	previous = c.mode
 	serve := c.serve
+	profile := c.profileDir
 	c.mode = mode
 	c.clearSessionLocked()
+	delete(c.profileStatus, profile)
 	c.repromptReady = false
 	c.repromptTag = [32]byte{}
 	c.mu.Unlock()
@@ -467,7 +537,7 @@ func (c *Client) SelectAvailableBackend(ctx context.Context, modes []string) (Ba
 	for _, value := range modes {
 		mode := BackendMode(value)
 		if err := c.BackendAvailable(ctx, mode); err == nil {
-			if err := c.SelectBackend(ctx, mode); err != nil {
+			if err := c.selectBackend(ctx, mode); err != nil {
 				return "", err
 			}
 			return mode, nil
@@ -482,24 +552,21 @@ func (c *Client) BackendAvailable(ctx context.Context, mode BackendMode) error {
 	if mode != BackendBW && mode != BackendBWServe {
 		return errors.New("unsupported Bitwarden backend")
 	}
-	version, err := c.callCLI(ctx, "bw --version", []string{"--version"}, nil, nil, false, "")
+	version, err := c.cachedVersion(ctx)
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	c.version, c.versionReady = strings.Split(string(version), "\n")[0], true
-	c.mu.Unlock()
 	if mode == BackendBW {
 		return nil
 	}
-	if !serveVersionSupported(string(version)) {
+	if !serveVersionSupported(version) {
 		return errors.New("bw serve requires Bitwarden CLI 2025.9.0 or later")
 	}
-	help, err := c.callCLI(ctx, "bw serve --help", []string{"serve", "--help"}, nil, nil, false, "")
+	hostname, err := c.cachedServeHostname(ctx)
 	// Recent bw releases support unix:// through --hostname but do not mention
 	// that transport in their generated help text. The version gate above is
 	// the compatibility guarantee; help only confirms the required option.
-	if err != nil || !strings.Contains(strings.ToLower(string(help)), "--hostname") {
+	if err != nil || !hostname {
 		return errors.New("bw serve does not support Unix sockets")
 	}
 	dir, err := secureServeDirectory()
@@ -507,6 +574,82 @@ func (c *Client) BackendAvailable(ctx context.Context, mode BackendMode) error {
 		return err
 	}
 	return os.Remove(dir)
+}
+
+func (c *Client) cachedVersion(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	if c.versionReady {
+		version := c.version
+		c.mu.Unlock()
+		return version, nil
+	}
+	if wait := c.versionWait; wait != nil {
+		c.mu.Unlock()
+		<-wait
+		c.mu.Lock()
+		version, ready, err := c.version, c.versionReady, c.versionErr
+		c.mu.Unlock()
+		if ready {
+			return version, nil
+		}
+		return "", err
+	}
+	wait := make(chan struct{})
+	c.versionWait = wait
+	c.versionErr = nil
+	c.mu.Unlock()
+	output, err := c.callCLI(ctx, "bw --version", []string{"--version"}, nil, nil, false, "")
+	version := strings.Split(string(output), "\n")[0]
+	c.mu.Lock()
+	if err == nil {
+		c.version, c.versionReady = version, true
+	}
+	c.versionErr = err
+	c.versionWait = nil
+	close(wait)
+	c.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+func (c *Client) cachedServeHostname(ctx context.Context) (bool, error) {
+	c.mu.Lock()
+	if c.serveHelpReady {
+		hostname := c.serveHostname
+		c.mu.Unlock()
+		return hostname, nil
+	}
+	if wait := c.serveHelpWait; wait != nil {
+		c.mu.Unlock()
+		<-wait
+		c.mu.Lock()
+		hostname, ready, err := c.serveHostname, c.serveHelpReady, c.serveHelpErr
+		c.mu.Unlock()
+		if ready {
+			return hostname, nil
+		}
+		return false, err
+	}
+	wait := make(chan struct{})
+	c.serveHelpWait = wait
+	c.serveHelpErr = nil
+	c.mu.Unlock()
+	help, err := c.callCLI(ctx, "bw serve --help", []string{"serve", "--help"}, nil, nil, false, "")
+	hostname := strings.Contains(strings.ToLower(string(help)), "--hostname")
+	c.mu.Lock()
+	if err == nil {
+		c.serveHostname, c.serveHelpReady = hostname, true
+	}
+	c.serveHelpErr = err
+	c.serveHelpWait = nil
+	close(wait)
+	c.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return hostname, nil
 }
 
 func (c *Client) clearSessionLocked() {
@@ -558,23 +701,17 @@ func (c *Client) sessionValue() string {
 }
 
 func (c *Client) Version(ctx context.Context) string {
-	c.mu.Lock()
-	version, ready := c.version, c.versionReady
-	c.mu.Unlock()
-	if ready {
-		return version
-	}
-	b, err := c.rawCLI(ctx, "--version")
+	version, err := c.cachedVersion(ctx)
 	if err != nil {
 		return "unavailable"
 	}
-	version = strings.Split(string(b), "\n")[0]
-	c.mu.Lock()
-	c.version, c.versionReady = version, true
-	c.mu.Unlock()
 	return version
 }
 func (c *Client) Status(ctx context.Context) (map[string]any, error) {
+	profile, status := c.currentProfileStatus()
+	if status != nil {
+		return status, nil
+	}
 	// bw serve exits before it can expose /status for an unauthenticated
 	// profile. Authentication state is not a vault operation, so inspect the
 	// isolated profile with bw until unlock has established this session.
@@ -583,13 +720,21 @@ func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return decodeObject(b, "bw status")
+		status, err := decodeObject(b, "bw status")
+		if err == nil {
+			c.setProfileStatus(profile, status)
+		}
+		return status, err
 	}
 	b, err := c.raw(ctx, "status")
 	if err != nil {
 		return nil, err
 	}
-	return decodeObject(b, "bw status")
+	status, err = decodeObject(b, "bw status")
+	if err == nil {
+		c.setProfileStatus(profile, status)
+	}
+	return status, err
 }
 func (c *Client) Login(ctx context.Context, id, secret string) error {
 	// bw serve has no login route. Stop the private process before modifying its
@@ -597,11 +742,8 @@ func (c *Client) Login(ctx context.Context, id, secret string) error {
 	if c.BackendMode() == BackendBWServe {
 		_ = c.serve.Stop(ctx)
 	}
-	b, err := c.rawCLI(ctx, "status")
-	if err != nil {
-		return err
-	}
-	status, err := decodeObject(b, "bw status")
+	profile, _ := c.currentProfileStatus()
+	status, err := c.Status(ctx)
 	if err != nil {
 		return err
 	}
@@ -610,10 +752,14 @@ func (c *Client) Login(ctx context.Context, id, secret string) error {
 			return nil
 		}
 		if _, err = c.rawCLI(ctx, "logout"); err != nil {
+			c.invalidateProfileStatus(profile)
 			return err
 		}
+		c.setProfileStatus(profile, map[string]any{"status": "unauthenticated"})
 	}
-	return c.loginAPIKey(ctx, id, secret)
+	err = c.loginAPIKey(ctx, id, secret)
+	c.invalidateProfileStatus(profile)
+	return err
 }
 
 // LoginUnauthenticated signs in a profile that this process has just verified
@@ -622,7 +768,10 @@ func (c *Client) LoginUnauthenticated(ctx context.Context, id, secret string) er
 	if c.BackendMode() == BackendBWServe {
 		_ = c.serve.Stop(ctx)
 	}
-	return c.loginAPIKey(ctx, id, secret)
+	profile, _ := c.currentProfileStatus()
+	err := c.loginAPIKey(ctx, id, secret)
+	c.invalidateProfileStatus(profile)
+	return err
 }
 
 func (c *Client) loginAPIKey(ctx context.Context, id, secret string) error {
@@ -675,6 +824,7 @@ func AuthenticationMessage(err error, master bool) string {
 }
 
 func (c *Client) Unlock(ctx context.Context, password string) error {
+	profile, _ := c.currentProfileStatus()
 	if c.BackendMode() == BackendBWServe {
 		c.mu.Lock()
 		profile, serve := c.profileDir, c.serve
@@ -685,10 +835,12 @@ func (c *Client) Unlock(ctx context.Context, password string) error {
 		ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
 		defer cancel()
 		if err := serve.Start(ctx, profile, ""); err != nil {
+			c.invalidateProfileStatus(profile)
 			return err
 		}
 		b, err := serve.request(ctx, "POST", "/unlock", map[string]string{"password": password})
 		if err != nil {
+			c.invalidateProfileStatus(profile)
 			return err
 		}
 		defer func() {
@@ -700,18 +852,27 @@ func (c *Client) Unlock(ctx context.Context, password string) error {
 			Raw string `json:"raw"`
 		}
 		if json.Unmarshal(b, &message) != nil || message.Raw == "" {
+			c.invalidateProfileStatus(profile)
 			return &CLIError{"bw unlock", "invalid JSON response", 0}
 		}
 		if err := c.setSession(message.Raw); err != nil {
+			c.invalidateProfileStatus(profile)
 			return err
 		}
-		return c.SetRepromptMaster(password)
+		if err := c.SetRepromptMaster(password); err != nil {
+			c.invalidateProfileStatus(profile)
+			return err
+		}
+		c.setProfileStatus(profile, map[string]any{"status": "unlocked"})
+		return nil
 	}
 	b, err := c.callCLI(ctx, "bw unlock", []string{"unlock", "--raw", "--passwordenv", "LAZYBW_MASTER_PASSWORD"}, nil, []string{"LAZYBW_MASTER_PASSWORD=" + password}, false, "")
 	if err != nil {
+		c.invalidateProfileStatus(profile)
 		return err
 	}
 	if len(b) == 0 {
+		c.invalidateProfileStatus(profile)
 		return &CLIError{"bw unlock", "empty response", 0}
 	}
 	defer func() {
@@ -720,9 +881,15 @@ func (c *Client) Unlock(ctx context.Context, password string) error {
 		}
 	}()
 	if err := c.setSession(string(b)); err != nil {
+		c.invalidateProfileStatus(profile)
 		return err
 	}
-	return c.SetRepromptMaster(password)
+	if err := c.SetRepromptMaster(password); err != nil {
+		c.invalidateProfileStatus(profile)
+		return err
+	}
+	c.setProfileStatus(profile, map[string]any{"status": "unlocked"})
+	return nil
 }
 
 // SetRepromptMaster retains a keyed verifier, not the cleartext master password.
@@ -777,7 +944,11 @@ func (c *Client) VerifyReprompt(candidate string) bool {
 	return equal
 }
 
-func (c *Client) SetSession(s string) { _ = c.setSession(s) }
+func (c *Client) SetSession(s string) {
+	_ = c.setSession(s)
+	profile, _ := c.currentProfileStatus()
+	c.invalidateProfileStatus(profile)
+}
 func (c *Client) HasSession() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

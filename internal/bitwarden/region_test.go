@@ -123,10 +123,11 @@ func TestIsolatedRegionsAndSessions(t *testing.T) {
 	if err := client.ConfigureRegion(ctx, dir, "us"); err != nil {
 		t.Fatal(err)
 	}
-	// Existing correctly configured profiles must not be rewritten.
+	// An externally assigned session makes the cached authentication state
+	// unreliable. The endpoint still must not be rewritten.
 	if len(runner.calls[before:]) != 1 ||
 		strings.Join(runner.calls[before].args, " ") != "status" {
-		t.Fatal("re-entering a configured region must only check status")
+		t.Fatal("an invalidated profile must fall back to status without rewriting")
 	}
 	for _, path := range []string{filepath.Join(dir, "bitwarden", "sessions"), filepath.Dir(us), us} {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0700 {
@@ -199,9 +200,9 @@ func TestMismatchedProfileLogsOutWithinProfileOnly(t *testing.T) {
 	if err := client.ConfigureRegion(ctx, dir, "eu"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 3 || strings.Join(runner.calls[1].args, " ") != "logout" ||
-		strings.Join(runner.calls[2].args, " ") != "config server https://vault.bitwarden.eu" {
-		t.Fatalf("incorrect profile repair commands: %+v", runner.calls)
+	if len(runner.calls) != 1 ||
+		strings.Join(runner.calls[0].args, " ") != "config server https://vault.bitwarden.eu" {
+		t.Fatalf("a new EU profile must be configured directly: %+v", runner.calls)
 	}
 }
 
