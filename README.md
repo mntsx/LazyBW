@@ -7,6 +7,15 @@ LazyBW is a keyboard-driven terminal user interface (TUI) for **Linux**, built o
 
 In addition to the capabilities exposed by `bw`, LazyBW can create encrypted, read-only local replicas of your **personal** vault for offline access. All remote vault operations continue to be performed through the official Bitwarden CLI.
 
+**Installation**:
+
+```bash
+git clone https://github.com/mntsx/LazyBW.git
+cd LazyBW
+go build -o lazybw ./cmd/lazybw
+sudo install -m 755 lazybw /usr/local/bin/lazybw
+```
+
 ## Requirements
 
 | Requirement | Purpose |
