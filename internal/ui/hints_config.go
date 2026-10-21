@@ -115,6 +115,11 @@ func (a *App) hints() []string {
 			}
 			continue
 		}
+		// Detail hints are already built from their configured action. Keeping
+		// them out of this legacy label mapping avoids reintroducing a fixed key.
+		if section == "detail" {
+			continue
+		}
 		action := configuredHintAction(section, label)
 		if action == "" {
 			continue
@@ -205,6 +210,9 @@ func configuredHintAction(section, label string) string {
 	case "f favourite":
 		return "favorite"
 	case "n new":
+		if section == "content" {
+			return "new_field"
+		}
 		return "new"
 	case "d delete":
 		return "delete"
@@ -219,18 +227,7 @@ func configuredHintAction(section, label string) string {
 			return "reveal_password"
 		}
 		return "reveal"
-	case "ctrl+J newline":
-		return "newline"
-	case "ctrl+w wrap", "ctrl+w unwrap":
-		return "wrap"
-	case "ctrl+z undo":
-		return "undo"
-	case "ctrl+y redo":
-		return "redo"
-	case "ctrl+c copy":
-		return "copy"
-	case "ctrl+v paste":
-		return "paste"
+
 	case "s push":
 		return "save"
 	case "d discard":

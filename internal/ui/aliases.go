@@ -16,6 +16,7 @@ type configuredBinding struct {
 
 func normalizedBindingKey(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.NewReplacer("↑", "up", "↓", "down", "←", "left", "→", "right").Replace(name)
 	switch name {
 	case "esc":
 		return "escape"
@@ -96,7 +97,7 @@ func (a *App) bindAliases(g *gocui.Gui) error {
 		"enter": true, "ctrl+j": true, "escape": true, "esc": true, "backspace": true,
 		"delete": true, "home": true, "end": true, "tab": true,
 		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
-		"ctrl+r": true, "ctrl+b": true, "ctrl+w": true,
+		"ctrl+r": true, "ctrl+b": true, "ctrl+w": true, "ctrl+n": true,
 		"ctrl+z": true, "ctrl+y": true, "ctrl+c": true, "ctrl+v": true,
 	}
 	for name := range a.configuredBindings() {
@@ -145,13 +146,19 @@ func (a *App) aliasAvailable(section, action string) bool {
 		return s.Mode == DialogFoldersChoice
 	}
 	if section == "authentication" {
-		return s.Screen == AuthClient
+		return s.Screen == AuthClient && s.ServerConnected
 	}
 	if section == "master_password" {
-		return s.Screen == AuthMaster
+		return s.Screen == AuthMaster && s.ServerConnected
+	}
+	if section == "text_input" {
+		return a.inputMode() && s.Mode != Edit && !a.creationTextInputLocked()
 	}
 	if section == "authentication_offline" {
 		return (s.Screen == AuthClient || s.Screen == AuthMaster) && !s.ServerConnected
+	}
+	if section == "offline" {
+		return s.Screen == AuthOffline
 	}
 	if section == "server_picker" {
 		return s.Mode == DialogServer
@@ -174,6 +181,9 @@ func (a *App) aliasAvailable(section, action string) bool {
 	}
 	if section == "global" && action == "sync" {
 		return s.Screen == Workspace && !s.LocalMode && s.ServerConnected
+	}
+	if section == "global" && action == "hint_next_page" {
+		return true
 	}
 	if section == "global" && action == "quit" {
 		return !a.modalOpen()
@@ -283,7 +293,9 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { a.confirmStage(false, true); return nil }
 	case "reveal_secret", "reveal_password":
 		return func() error { a.S.AuthVisible = !a.S.AuthVisible; return nil }
-	case "hint_next_page", "next_page":
+	case "hint_next_page":
+		return func() error { a.nextHintPage(); return nil }
+	case "next_page":
 		return func() error { return a.char('?') }
 	case "soft_sync":
 		return func() error { return a.char('s') }
@@ -308,12 +320,20 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { return a.char('n') }
 	case "delete", "delete_field", "discard":
 		return func() error { return a.char('d') }
+	case "cut":
+		if section == "detail" {
+			return a.cutEditorSelection
+		}
+		return nil
 	case "copy":
 		if section == "detail" {
 			return a.copyEditorSelection
 		}
 		return func() error { return a.char('c') }
 	case "reveal":
+		if section == "detail" {
+			return a.toggleAuthVisibility
+		}
 		return func() error { return a.char('r') }
 	case "edit", "open_detail":
 		return func() error { return a.S.BeginEdit() }
@@ -329,6 +349,100 @@ func (a *App) configuredShortcut(section, action string) func() error {
 		return func() error { a.S.RedoEdit(); return nil }
 	case "paste":
 		return a.pasteEditorText
+	case "select_all":
+		return func() error {
+			if section == "detail" {
+				a.S.SelectAll()
+			}
+			return nil
+		}
+	case "cursor_up":
+		return func() error { return a.arrow(-1, 0) }
+	case "cursor_down":
+		return func() error { return a.arrow(1, 0) }
+	case "cursor_left":
+		return func() error { return a.arrow(0, -1) }
+	case "cursor_right":
+		return func() error { return a.arrow(0, 1) }
+	case "cursor_start":
+		return func() error { a.S.moveCaret(0, false); return nil }
+	case "cursor_end":
+		return func() error {
+			if section == "text_input" && (a.S.Screen != Workspace || a.S.Mode == DialogReprompt) {
+				a.S.Caret = utf8.RuneCountInString(a.authValue())
+			} else {
+				a.S.moveCaret(utf8.RuneCountInString(a.S.Input), false)
+			}
+			return nil
+		}
+	case "delete_backward":
+		return a.backspace
+	case "delete_forward":
+		return a.deleteForward
+	case "word_previous", "word_next", "delete_word_previous", "delete_word_next":
+		return func() error {
+			direction := 1
+			if action == "word_previous" || action == "delete_word_previous" {
+				direction = -1
+			}
+			remove := action == "delete_word_previous" || action == "delete_word_next"
+			if section == "text_input" {
+				return a.wordEdit(direction, remove)
+			}
+			if remove {
+				a.S.DeleteWord(direction)
+			} else {
+				a.S.WordCursor(direction)
+			}
+			return nil
+		}
+	case "blank_line_previous", "blank_line_next":
+		return func() error {
+			direction := 1
+			if action == "blank_line_previous" {
+				direction = -1
+			}
+			a.S.CursorBlankLine(direction, false)
+			return nil
+		}
+	case "select_left", "select_right":
+		return func() error {
+			direction := 1
+			if action == "select_left" {
+				direction = -1
+			}
+			a.S.CursorSelect(direction)
+			return nil
+		}
+	case "select_up", "select_down":
+		return func() error {
+			direction := 1
+			if action == "select_up" {
+				direction = -1
+			}
+			if strings.Contains(a.S.Input, "\n") {
+				a.S.CursorSelectLine(direction)
+			}
+			return nil
+		}
+	case "select_word_previous", "select_word_next":
+		return func() error {
+			direction := 1
+			if action == "select_word_previous" {
+				direction = -1
+			}
+			a.S.moveCaret(WordBoundary(a.S.Input, a.S.Caret, direction), true)
+			return nil
+		}
+	case "select_blank_line_previous", "select_blank_line_next":
+		return func() error {
+			direction := 1
+			if action == "select_blank_line_previous" {
+				direction = -1
+			}
+			a.S.CursorBlankLine(direction, true)
+			return nil
+		}
 	}
 	focus := map[string]Pane{
 		"focus_my_vault": PaneVault, "focus_item_types": PaneTypes,
@@ -474,8 +588,17 @@ func aliasActionName(section, action string) string {
 		return "next page"
 	case "newline":
 		return "newline"
-	case "wrap", "undo", "redo", "paste":
+	case "wrap", "undo", "redo", "cut", "paste", "select_all":
 		return action
+	case "cursor_up", "cursor_down", "cursor_left", "cursor_right",
+		"cursor_start", "cursor_end", "word_previous", "word_next",
+		"blank_line_previous", "blank_line_next":
+		return "move"
+	case "delete_backward", "delete_forward", "delete_word_previous", "delete_word_next":
+		return "delete"
+	case "select_left", "select_right", "select_up", "select_down",
+		"select_word_previous", "select_word_next", "select_blank_line_previous", "select_blank_line_next":
+		return "select"
 	case "switch", "copy", "edit", "quit":
 		return action
 	}

@@ -737,7 +737,9 @@ func (a *App) authRender(c *Canvas) {
 	}
 
 	section, revealAction := "authentication", "reveal_secret"
-	if s.Screen == AuthMaster {
+	if connectionLost {
+		section, revealAction = "authentication_offline", ""
+	} else if s.Screen == AuthMaster {
 		section, revealAction = "master_password", "reveal_password"
 	}
 	hints := joinConfiguredHints(
@@ -1889,6 +1891,22 @@ func (a *App) copyEditorSelection() error {
 		return nil
 	}
 	return a.clipboard(string([]rune(a.S.Input)[start:end]))
+}
+
+func (a *App) cutEditorSelection() error {
+	if a.S.Mode != Edit {
+		return nil
+	}
+	start, end, ok := a.S.selection()
+	if !ok {
+		return nil
+	}
+	if err := a.clipboard(string([]rune(a.S.Input)[start:end])); err != nil {
+		return err
+	}
+	a.S.recordEdit()
+	a.S.deleteSelection()
+	return nil
 }
 
 func (a *App) pasteEditorText() error {

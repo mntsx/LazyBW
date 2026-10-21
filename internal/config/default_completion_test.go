@@ -92,7 +92,11 @@ func TestLoadPersistsMissingKeybindDefaultsAndLegacyAliases(t *testing.T) {
 		t.Fatal("keybind JSONC comment was removed")
 	}
 	items := object["items"].(map[string]any)
-	if items["open"] == nil || items["search"].([]any)[0] != "x" || object["filters"] == nil {
+	detail := object["detail"].(map[string]any)
+	textInput := object["text_input"].(map[string]any)
+	if items["open"] == nil || items["search"].([]any)[0] != "x" || object["filters"] == nil ||
+		detail["select_all"].([]any)[0] != "ctrl+a" ||
+		textInput["delete_backward"].([]any)[0] != "backspace" {
 		t.Fatalf("missing keybind defaults were not persisted: %#v", object)
 	}
 	global := object["global"].(map[string]any)

@@ -1369,15 +1369,25 @@ func (a *App) baseHints() []string {
 	case s.Mode == Find:
 		h = append(h, "ENTER apply", "esc back")
 	case s.Mode == Edit:
-		h = append(h, "ENTER apply", "esc cancel")
+		h = append(h,
+			a.configuredHint("detail", "save", "apply"),
+			a.configuredHint("detail", "back", "cancel"),
+		)
+		wrapLabel := "wrap"
 		if s.InputWrap {
-			h = append(h, "ctrl+w unwrap")
-		} else {
-			h = append(h, "ctrl+w wrap")
+			wrapLabel = "unwrap"
 		}
-		h = append(h, "ctrl+J newline", "ctrl+z undo", "ctrl+y redo", "ctrl+c copy", "ctrl+v paste")
+		h = append(h,
+			a.configuredHint("detail", "wrap", wrapLabel),
+			a.configuredHint("detail", "newline", "newline"),
+			a.configuredHint("detail", "undo", "undo"),
+			a.configuredHint("detail", "redo", "redo"),
+			a.configuredHint("detail", "cut", "cut"),
+			a.configuredHint("detail", "copy", "copy"),
+			a.configuredHint("detail", "paste", "paste"),
+		)
 		if s.InputSecret {
-			h = append(h, "ctrl+r reveal")
+			h = append(h, a.configuredHint("detail", "reveal", "reveal"))
 		}
 	case s.Focus == PaneChanges:
 		h = append(h, "↑/↓ move")

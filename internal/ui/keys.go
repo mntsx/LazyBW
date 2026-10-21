@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/awesome-gocui/gocui"
 	"github.com/miguelmnts/lazybw-go/internal/bitwarden"
@@ -16,65 +15,48 @@ import (
 
 func (a *App) bind(g *gocui.Gui) error {
 	a.terminalBS = terminalBackspaceCode()
-	textOnly := func(action func() error) func() error {
-		return func() error {
-			if a.textEntryActive() {
-				return action()
-			}
-			return nil
-		}
-	}
+
 	bindings := []struct {
 		key      interface{}
 		name     string
 		modifier gocui.Modifier
 		fallback func() error
 	}{
-		{gocui.KeyArrowUp, "up", gocui.ModNone, textOnly(func() error { return a.arrow(-1, 0) })},
-		{gocui.KeyArrowDown, "down", gocui.ModNone, textOnly(func() error { return a.arrow(1, 0) })},
-		{gocui.KeyArrowLeft, "left", gocui.ModNone, textOnly(func() error { return a.arrow(0, -1) })},
-		{gocui.KeyArrowRight, "right", gocui.ModNone, textOnly(func() error { return a.arrow(0, 1) })},
-		{gocui.KeyCtrlW, "ctrl+w", gocui.ModNone, func() error { return a.wordEdit(-1, true) }},
+		{gocui.KeyArrowUp, "up", gocui.ModNone, nil},
+		{gocui.KeyArrowDown, "down", gocui.ModNone, nil},
+		{gocui.KeyArrowLeft, "left", gocui.ModNone, nil},
+		{gocui.KeyArrowRight, "right", gocui.ModNone, nil},
+		{gocui.KeyCtrlW, "ctrl+w", gocui.ModNone, nil},
 		{gocui.KeyEnter, "enter", gocui.ModNone, nil},
 		{gocui.KeyCtrlJ, "ctrl+j", gocui.ModNone, nil},
 		{gocui.KeyEsc, "escape", gocui.ModNone, nil},
-		{gocui.KeyBackspace2, "backspace", gocui.ModNone, func() error { return a.terminalBackspace(gocui.KeyBackspace2) }},
-		{gocui.KeyBackspace, "backspace", gocui.ModNone, func() error { return a.terminalBackspace(gocui.KeyBackspace) }},
-		{gocui.KeyTab, "tab", gocui.ModNone, func() error { return nil }},
-		{gocui.KeyDelete, "delete", gocui.ModNone, a.deleteForward},
-		{gocui.KeyHome, "home", gocui.ModNone, func() error {
-			if !a.modalOpen() {
-				a.S.Caret = 0
-			}
-			return nil
-		}},
-		{gocui.KeyEnd, "end", gocui.ModNone, func() error {
-			if !a.modalOpen() {
-				if a.S.Screen != Workspace && a.S.AuthFocus < 2 {
-					a.S.Caret = utf8.RuneCountInString(a.authValue())
-				} else {
-					a.S.Caret = utf8.RuneCountInString(a.S.Input)
-				}
-			}
-			return nil
-		}},
+		{gocui.KeyBackspace2, "backspace", gocui.ModNone, nil},
+		{gocui.KeyBackspace, "backspace", gocui.ModNone, nil},
+		{gocui.KeyTab, "tab", gocui.ModNone, nil},
+		{gocui.KeyDelete, "delete", gocui.ModNone, nil},
+		{gocui.KeyHome, "home", gocui.ModNone, nil},
+		{gocui.KeyEnd, "end", gocui.ModNone, nil},
 		{gocui.KeyCtrlQ, "ctrl+q", gocui.ModNone, nil},
 		{gocui.KeyCtrlS, "ctrl+s", gocui.ModNone, nil},
 		{gocui.KeyCtrlP, "ctrl+p", gocui.ModNone, nil},
 		{gocui.KeyCtrlD, "ctrl+d", gocui.ModNone, nil},
 		{gocui.KeyCtrlR, "ctrl+r", gocui.ModNone, nil},
 		{gocui.KeyCtrlB, "ctrl+b", gocui.ModNone, nil},
-		{gocui.KeyCtrlZ, "ctrl+z", gocui.ModNone, textOnly(func() error { if a.S.Mode == Edit { a.S.UndoEdit() }; return nil })},
-		{gocui.KeyCtrlY, "ctrl+y", gocui.ModNone, textOnly(func() error { if a.S.Mode == Edit { a.S.RedoEdit() }; return nil })},
-		{gocui.KeyCtrlC, "ctrl+c", gocui.ModNone, textOnly(a.copyEditorSelection)},
-		{gocui.KeyCtrlV, "ctrl+v", gocui.ModNone, textOnly(a.pasteEditorText)},
-		{gocui.KeyCtrlN, "ctrl+n", gocui.ModNone, textOnly(func() error { a.nextHintPage(); return nil })},
+		{gocui.KeyCtrlZ, "ctrl+z", gocui.ModNone, nil},
+		{gocui.KeyCtrlY, "ctrl+y", gocui.ModNone, nil},
+		{gocui.KeyCtrlC, "ctrl+c", gocui.ModNone, nil},
+		{gocui.KeyCtrlV, "ctrl+v", gocui.ModNone, nil},
+		{gocui.KeyCtrlN, "ctrl+n", gocui.ModNone, nil},
 	}
 	for _, entry := range bindings {
 		spec := entry
 		if err := g.SetKeybinding("", spec.key, spec.modifier,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				handled, err := a.dispatchConfiguredKey(spec.name)
+				name := spec.name
+				if key, ok := spec.key.(gocui.Key); ok && name == "backspace" && terminalWordBackspaceKey(key, a.terminalBS) {
+					name = "ctrl+backspace"
+				}
+				handled, err := a.dispatchConfiguredKey(name)
 				if handled {
 					return err
 				}
@@ -113,14 +95,10 @@ func (a *App) bind(g *gocui.Gui) error {
 		spec := native
 		if err := g.SetKeybinding("", gocui.Key(spec.Key), gocui.ModNone,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				return a.handleKey(spec.Label, func() error {
-					if a.S.Mode == Edit {
-						direction := 1
-						if spec.Action == terminalkeys.PreviousBlankLine { direction = -1 }
-						a.S.CursorBlankLine(direction, spec.Select)
-					}
-					return nil
-				})
+				if handled, err := a.dispatchConfiguredKey(spec.Label); handled || err != nil {
+					return err
+				}
+				return nil
 			}); err != nil { return err }
 	}
 	for _, binding := range []struct {
@@ -128,20 +106,16 @@ func (a *App) bind(g *gocui.Gui) error {
 		label     string
 		toEnd     bool
 	}{
-		{gocui.KeyArrowUp, "ctrl+↑", false},
-		{gocui.KeyArrowDown, "ctrl+↓", true},
+		{gocui.KeyArrowUp, "ctrl+up", false},
+		{gocui.KeyArrowDown, "ctrl+down", true},
 	} {
 		spec := binding
 		if err := g.SetKeybinding("", spec.key, gocui.ModMouseCtrl,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				return a.handleKey(spec.label, func() error {
-					if a.S.Mode == Edit {
-						direction := -1
-						if spec.toEnd { direction = 1 }
-						a.S.CursorBlankLine(direction, false)
-					}
-					return nil
-				})
+				if handled, err := a.dispatchConfiguredKey(spec.label); handled || err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 			return err
 		}
@@ -156,26 +130,26 @@ func (a *App) bind(g *gocui.Gui) error {
 		spec := binding
 		if err := g.SetKeybinding("", spec.key, gocui.ModShift,
 			func(_ *gocui.Gui, _ *gocui.View) error {
-				return a.handleKey("shift", func() error {
-					if a.S.Mode != Edit { return nil }
-					if spec.key == gocui.KeyArrowLeft || spec.key == gocui.KeyArrowRight {
-						a.S.CursorSelect(spec.direction)
-					} else if strings.Contains(a.S.Input, "\n") {
-						a.S.CursorSelectLine(spec.direction)
+				label := "shift+up"
+				if spec.key == gocui.KeyArrowLeft { label = "shift+left" }
+				if spec.key == gocui.KeyArrowRight { label = "shift+right" }
+				if spec.key == gocui.KeyArrowDown { label = "shift+down" }
+				if handled, err := a.dispatchConfiguredKey(label); handled || err != nil {
+					return err
+				}
+				return nil
+			}); err != nil { return err }
+			if err := g.SetKeybinding("", spec.key, gocui.ModMouseCtrl|gocui.ModShift,
+				func(_ *gocui.Gui, _ *gocui.View) error {
+					label := "ctrl+shift+up"
+					if spec.key == gocui.KeyArrowLeft { label = "ctrl+shift+left" }
+					if spec.key == gocui.KeyArrowRight { label = "ctrl+shift+right" }
+					if spec.key == gocui.KeyArrowDown { label = "ctrl+shift+down" }
+					if handled, err := a.dispatchConfiguredKey(label); handled || err != nil {
+						return err
 					}
 					return nil
-				})
-			}); err != nil { return err }
-		if err := g.SetKeybinding("", spec.key, gocui.ModMouseCtrl|gocui.ModShift,
-			func(_ *gocui.Gui, _ *gocui.View) error {
-				return a.handleKey("ctrl+shift", func() error {
-					if a.S.Mode != Edit { return nil }
-					if spec.key == gocui.KeyArrowLeft || spec.key == gocui.KeyArrowRight {
-						a.S.moveCaret(WordBoundary(a.S.Input, a.S.Caret, spec.direction), true)
-					} else { a.S.CursorBlankLine(spec.direction, true) }
-					return nil
-				})
-			}); err != nil { return err }
+				}); err != nil { return err }
 	}
 	return a.bindAliases(g)
 }
@@ -193,13 +167,13 @@ type wordKeyBinding struct {
 // editing keys. No synthetic F-keys or terminal configuration is needed.
 func wordKeyBindings() []wordKeyBinding {
 	return []wordKeyBinding{
-		{gocui.KeyArrowLeft, gocui.ModMouseCtrl, "ctrl+←", -1, false},
-		{gocui.KeyArrowRight, gocui.ModMouseCtrl, "ctrl+→", 1, false},
+		{gocui.KeyArrowLeft, gocui.ModMouseCtrl, "ctrl+left", -1, false},
+		{gocui.KeyArrowRight, gocui.ModMouseCtrl, "ctrl+right", 1, false},
 		{gocui.KeyBackspace, gocui.ModMouseCtrl, "ctrl+backspace", -1, true},
 		{gocui.KeyBackspace2, gocui.ModMouseCtrl, "ctrl+backspace", -1, true},
 		{gocui.KeyDelete, gocui.ModMouseCtrl, "ctrl+delete", 1, true},
-		{gocui.KeyArrowLeft, gocui.ModAlt, "alt+←", -1, false},
-		{gocui.KeyArrowRight, gocui.ModAlt, "alt+→", 1, false},
+		{gocui.KeyArrowLeft, gocui.ModAlt, "alt+left", -1, false},
+		{gocui.KeyArrowRight, gocui.ModAlt, "alt+right", 1, false},
 		{gocui.KeyBackspace, gocui.ModAlt, "alt+backspace", -1, true},
 		{gocui.KeyBackspace2, gocui.ModAlt, "alt+backspace", -1, true},
 		{gocui.KeyDelete, gocui.ModAlt, "alt+delete", 1, true},
@@ -233,9 +207,13 @@ func (a *App) bindWordKeys(register func(interface{}, gocui.Modifier, func(*gocu
 	for _, binding := range bindings {
 		spec := binding
 		if err := register(spec.key, spec.modifier, func(_ *gocui.Gui, _ *gocui.View) error {
-			return a.handleKey(spec.label, func() error {
-				return a.wordEdit(spec.direction, spec.remove)
-			})
+			if handled, err := a.dispatchConfiguredKey(spec.label); handled || err != nil {
+				return err
+			}
+			if a.textEntryActive() {
+				return nil
+			}
+			return nil
 		}); err != nil {
 			return err
 		}

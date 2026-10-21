@@ -27,7 +27,7 @@ func TestGeneratedJSONCIsAnnotatedAndListsEveryContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, section := range []string{"content", "folders", "edits", "sync_popup",
-		"folder_selector_popup", "card_brand_popup", "authentication_offline"} {
+		"folder_selector_popup", "card_brand_popup", "authentication_offline", "offline", "text_input"} {
 		if !strings.Contains(string(file), "\""+section+"\": {") {
 			t.Errorf("missing keybinding section %s", section)
 		}
@@ -36,6 +36,15 @@ func TestGeneratedJSONCIsAnnotatedAndListsEveryContext(t *testing.T) {
 		!strings.Contains(string(file), `"right"`) ||
 		!strings.Contains(string(file), `"enter"`) {
 		t.Fatal("checkbox alternate keys absent")
+	}
+	if !strings.Contains(string(file), `"select_all": [`) ||
+		!strings.Contains(string(file), `"ctrl+a"`) ||
+		cfg.Key("detail", "select_all") != "ctrl+a" || cfg.Key("detail", "cut") != "ctrl+x" {
+		t.Fatal("detail select-all default is absent or incorrect")
+	}
+	if cfg.Key("text_input", "delete_backward") != "backspace" ||
+		cfg.Key("offline", "quit") != "enter" || cfg.Keys("global", "hint_next_page")[1] != "ctrl+n" {
+		t.Fatal("global text-input or offline default is incorrect")
 	}
 	if got := cfg.Key("content", "switch"); got != "s" {
 		t.Fatalf("wrong hint priority: %q", got)

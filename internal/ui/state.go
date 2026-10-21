@@ -936,6 +936,13 @@ func (s *State) DeleteForward() {
 }
 func (s *State) Cursor(delta int)       { s.moveCaret(s.Caret+delta, false) }
 func (s *State) CursorSelect(delta int) { s.moveCaret(s.Caret+delta, true) }
+
+// SelectAll selects the complete editor value without changing it.
+func (s *State) SelectAll() {
+	s.SelectionAnchor = 0
+	s.Caret = len([]rune(s.Input))
+}
+
 func (s *State) UndoEdit() {
 	if len(s.editUndo) == 0 {
 		return

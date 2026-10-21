@@ -453,8 +453,6 @@ func (a *App) offlineRender(c *Canvas) {
 	w := 12
 	x := (c.W - w) / 2
 	a.authButton(c, x, c.H/2+1, w, "QUIT", CRed, false, false)
-	authHints(c, c.H-3, joinConfiguredHints(
-		a.configuredHint("authentication_offline", "server", "server"),
-		a.configuredHint("authentication_offline", "quit", "quit")))
+	authHints(c, c.H-3, a.configuredHint("offline", "quit", "quit"))
 	drawMainBorders(c, nil, nil, -1)
 }

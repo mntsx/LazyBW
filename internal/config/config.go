@@ -134,6 +134,9 @@ var DefaultIcons = Icons{
 
 // A list is ordered: its first key is displayed in footer hints.
 // Existing JSONC files containing one string per action remain supported.
+// To add a keybinding, update keybinds.jsonc and this template together so it
+// is written on creation and completion, then route the UI action through
+// Config.Keys. Do not add a hard-coded UI shortcut without a matching default.
 var DefaultKeybinds = map[string]map[string][]string{
 	"global": {
 		"quit": {"ctrl+q"}, "sync": {"ctrl+s"},
@@ -142,7 +145,7 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"focus_my_vault": {"1"}, "focus_item_types": {"2"},
 		"focus_folders": {"3"}, "focus_changes": {"4"},
 		"focus_items": {"5"}, "focus_content": {"6"},
-		"hint_next_page": {"?"},
+		"hint_next_page": {"?", "ctrl+n"},
 	},
 	"authentication": {
 		"next": {"down"}, "previous": {"up"},
@@ -159,6 +162,9 @@ var DefaultKeybinds = map[string]map[string][]string{
 	"authentication_offline": {
 		"button_left": {"left"}, "button_right": {"right"},
 		"submit": {"enter"}, "server": {"ctrl+s"}, "backend": {"ctrl+b"}, "quit": {"ctrl+q"},
+	},
+	"offline": {
+		"quit": {"enter", "escape", "ctrl+q"},
 	},
 	"server_picker": {
 		"next": {"down"}, "previous": {"up"},
@@ -182,7 +188,16 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"delete": {"d"}, "new": {"n"},
 	},
 	"search": {
-		"leave": {"escape"}, "apply": {"enter"},
+		"leave": {"escape"}, "apply": {"enter"}, "previous": {"up"},
+		"button_left": {"left"}, "button_right": {"right"},
+	},
+	"text_input": {
+		"cursor_start": {"home"}, "cursor_end": {"end"},
+		"delete_backward": {"backspace"}, "delete_forward": {"delete"},
+		"word_previous": {"ctrl+left", "alt+left", "alt+b"},
+		"word_next": {"ctrl+right", "alt+right", "alt+f"},
+		"delete_word_previous": {"ctrl+w", "ctrl+backspace", "alt+backspace"},
+		"delete_word_next": {"ctrl+delete", "alt+delete", "alt+d"},
 	},
 	"edits": {
 		"save": {"s", "enter"}, "discard": {"d"},
@@ -200,13 +215,24 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"back": {"escape"}, "save": {"enter"},
 		"newline": {"ctrl+j"}, "reveal": {"ctrl+r"},
 		"wrap": {"ctrl+w"}, "undo": {"ctrl+z"}, "redo": {"ctrl+y"},
-		"copy": {"ctrl+c"}, "paste": {"ctrl+v"},
+		"cut": {"ctrl+x"}, "copy": {"ctrl+c"}, "paste": {"ctrl+v"}, "select_all": {"ctrl+a"},
+		"cursor_up": {"up"}, "cursor_down": {"down"},
+		"cursor_left": {"left"}, "cursor_right": {"right"},
+		"cursor_start": {"home"}, "cursor_end": {"end"},
+		"delete_backward": {"backspace"}, "delete_forward": {"delete"},
+		"word_previous": {"ctrl+left", "alt+left", "alt+b"},
+		"word_next": {"ctrl+right", "alt+right", "alt+f"},
+		"delete_word_previous": {"ctrl+backspace", "alt+backspace"},
+		"delete_word_next": {"ctrl+delete", "alt+delete", "alt+d"},
+		"blank_line_previous": {"ctrl+up"}, "blank_line_next": {"ctrl+down"},
+		"select_left": {"shift+left"}, "select_right": {"shift+right"},
+		"select_up": {"shift+up"}, "select_down": {"shift+down"},
+		"select_word_previous": {"ctrl+shift+left"},
+		"select_word_next": {"ctrl+shift+right"},
+		"select_blank_line_previous": {"ctrl+shift+up"},
+		"select_blank_line_next": {"ctrl+shift+down"},
 	},
-	"popup": {
-		"cancel": {"escape"}, "next": {"down"},
-		"previous": {"up"}, "button_left": {"left"},
-		"button_right": {"right"}, "confirm": {"enter"},
-	},
+
 	"confirmation_popup": {
 		"confirm": {"enter"}, "cancel": {"escape", "c"},
 		"accept": {"y"}, "reject": {"n"},
@@ -247,6 +273,7 @@ var DefaultKeybinds = map[string]map[string][]string{
 		"confirm": {"right", "enter"}, "cancel": {"escape"},
 	},
 	"reprompt_popup": {"confirm": {"enter"}, "cancel": {"escape"},
+		"button_left": {"left"}, "button_right": {"right"},
 		"reveal_password": {"ctrl+r"}},
 	"name_popup": {
 		"next": {"down"}, "previous": {"up"},
