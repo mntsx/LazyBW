@@ -29,20 +29,21 @@ type Item struct {
 	Cipher *Cipher
 }
 type Field struct {
-	Name       string
-	Value      any
-	Hidden     bool
-	Restricted bool
-	Custom     bool
-	Editable   bool
-	Path       []any
-	FieldType  int
-	Websites   bool
-	Linked     bool
-	LinkedID   int
-	Reprompt   bool
-	Values     []string
-	Folders    bool
+	Name           string
+	Value          any
+	Hidden         bool
+	Restricted     bool
+	Custom         bool
+	Editable       bool
+	Path           []any
+	FieldType      int
+	Websites       bool
+	Linked         bool
+	LinkedID       int
+	Reprompt       bool
+	Values         []string
+	Folders        bool
+	EncryptedLimit int
 }
 
 func (f Field) Reveal(c *Cipher) (string, error) {
@@ -50,6 +51,41 @@ func (f Field) Reveal(c *Cipher) (string, error) {
 		return "", fmt.Errorf("permission denied: protected field")
 	}
 	return c.Open(f.Value)
+}
+
+// ExceedsUTF8Limit reports whether the field's plaintext value exceeds the
+// capacity derived from its encrypted Bitwarden limit. Sealed values retain
+// their AES-GCM ciphertext length, so their plaintext byte count is available
+// without opening the secret.
+func (f Field) ExceedsUTF8Limit(c *Cipher) bool {
+	maximum := PlaintextByteLimit(f.EncryptedLimit)
+	if maximum == 0 {
+		return false
+	}
+	if f.Websites {
+		for _, value := range f.Values {
+			if len(value) > maximum {
+				return true
+			}
+		}
+		return false
+	}
+	if sealed, ok := f.Value.(*Sealed); ok {
+		return len(sealed.Data)-16 > maximum // AES-GCM authentication tag.
+	}
+	value, err := f.Reveal(c)
+	return err == nil && len(value) > maximum
+}
+
+// HasOverlongField reports whether any independently encrypted text field in
+// the item exceeds its Bitwarden type-2 plaintext capacity.
+func (i *Item) HasOverlongField() bool {
+	for _, field := range i.Fields() {
+		if field.ExceedsUTF8Limit(i.Cipher) {
+			return true
+		}
+	}
+	return false
 }
 func (i *Item) ID() string       { return stringValue(i.Raw["id"]) }
 func (i *Item) Name() string     { return stringValue(i.Raw["name"]) }
@@ -334,8 +370,8 @@ func (i *Item) Set(path []any, value string) error {
 }
 func (i *Item) Fields() []Field {
 	result := []Field{}
-	add := func(name string, path []any, hidden bool) {
-		result = append(result, Field{Name: name, Value: getPath(i.Raw, path), Hidden: hidden, Editable: true, Path: path})
+	add := func(name string, path []any, hidden bool, encryptedLimit int) {
+		result = append(result, Field{Name: name, Value: getPath(i.Raw, path), Hidden: hidden, Editable: true, Path: path, EncryptedLimit: encryptedLimit})
 	}
 	for _, definition := range FieldDefinitions(i.Type()) {
 		if definition.Websites {
@@ -351,7 +387,7 @@ func (i *Item) Fields() []Field {
 			result = append(result, Field{
 				Name: definition.Name, Value: strings.Join(values, "\n"),
 				Editable: true, Websites: true, Values: values,
-				Path: []any{"login", "uris"},
+				Path: []any{"login", "uris"}, EncryptedLimit: definition.EncryptedLimit,
 			})
 			continue
 		}
@@ -359,7 +395,7 @@ func (i *Item) Fields() []Field {
 		for n, part := range definition.Path {
 			path[n] = part
 		}
-		add(definition.Name, path, definition.Hidden)
+		add(definition.Name, path, definition.Hidden, definition.EncryptedLimit)
 	}
 
 	result = append(result, Field{Name: "Master password reprompt", Value: i.Raw["reprompt"] == float64(1) || i.Raw["reprompt"] == 1, Reprompt: true, Editable: true, Path: []any{"reprompt"}})
@@ -381,7 +417,8 @@ func (i *Item) Fields() []Field {
 				}
 				result = append(result, Field{Name: name, Value: target, Custom: true, Linked: true, LinkedID: id, Editable: true, FieldType: 3, Path: []any{"fields", idx, "linkedId"}})
 			} else {
-				result = append(result, Field{Name: name, Value: m["value"], Hidden: intValue(m["type"]) == 1, Editable: true, Custom: true, FieldType: intValue(m["type"]), Path: []any{"fields", idx, "value"}})
+				fieldType := intValue(m["type"])
+				result = append(result, Field{Name: name, Value: m["value"], Hidden: fieldType == 1, Editable: true, Custom: true, FieldType: fieldType, Path: []any{"fields", idx, "value"}, EncryptedLimit: CustomFieldEncryptedLimit(fieldType)})
 			}
 		}
 	}

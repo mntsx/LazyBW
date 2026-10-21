@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
 )
 
 type Screen int
@@ -122,6 +121,7 @@ type State struct {
 	SelectionAnchor                    int
 	editUndo, editRedo                 []editorSnapshot
 	InputSecret                        bool
+	InputEncryptedLimit                int
 	AuthID, AuthSecret, Master         string
 	ClientUnauthenticated              bool
 	masterSealed                       *vault.Sealed
@@ -522,6 +522,7 @@ func (s *State) BeginTextEdit() error {
 	s.Focus = PaneDetail
 	s.InputWrap = false
 	s.InputSecret = f.Hidden
+	s.InputEncryptedLimit = f.EncryptedLimit
 	// Content and Details share the visibility of this specific hidden field.
 	s.AuthVisible = f.Hidden && s.Revealed[s.RevealKey()]
 	return nil
@@ -554,6 +555,7 @@ func (s *State) BeginEditWebsite(index int) error {
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = path, false
 	s.Mode, s.Focus, s.InputWrap, s.InputSecret = Edit, PaneDetail, false, false
+	s.InputEncryptedLimit = vault.Schema().WebsiteField.EncryptedLimit
 	return nil
 }
 
@@ -563,6 +565,7 @@ func (s *State) BeginNewWebsite() {
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.EditPath, s.EditNewWebsite = nil, true
 	s.InputWrap, s.InputSecret, s.Mode, s.Focus = false, false, Edit, PaneDetail
+	s.InputEncryptedLimit = vault.Schema().WebsiteField.EncryptedLimit
 }
 
 func (s *State) CommitEdit() error {
@@ -664,6 +667,7 @@ func (s *State) ExitEdit() {
 	s.InputWrap = false
 	s.SelectionAnchor, s.editUndo, s.editRedo = -1, nil, nil
 	s.InputSecret = false
+	s.InputEncryptedLimit = 0
 	s.AuthVisible = false // Never carry editor visibility into authentication.
 	s.EditPath = nil
 	s.EditNewWebsite = false
@@ -853,7 +857,11 @@ func (s *State) FieldStatus(f vault.Field) vault.Kind {
 	}
 	return s.Stage.FieldKind(it.ID(), f.Path, s.CLI.Cipher)
 }
-type editorSnapshot struct{ input string; caret, anchor int }
+
+type editorSnapshot struct {
+	input         string
+	caret, anchor int
+}
 
 func (s *State) recordEdit() {
 	if s.Mode == Edit {
@@ -862,12 +870,16 @@ func (s *State) recordEdit() {
 	}
 }
 func (s *State) selection() (int, int, bool) {
-	if s.SelectionAnchor < 0 || s.SelectionAnchor == s.Caret { return 0, 0, false }
+	if s.SelectionAnchor < 0 || s.SelectionAnchor == s.Caret {
+		return 0, 0, false
+	}
 	return min(s.SelectionAnchor, s.Caret), max(s.SelectionAnchor, s.Caret), true
 }
 func (s *State) deleteSelection() bool {
 	start, end, ok := s.selection()
-	if !ok { return false }
+	if !ok {
+		return false
+	}
 	r := []rune(s.Input)
 	s.Input, s.Caret, s.SelectionAnchor = string(append(r[:start], r[end:]...)), start, -1
 	return true
@@ -875,8 +887,12 @@ func (s *State) deleteSelection() bool {
 func (s *State) moveCaret(caret int, selectText bool) {
 	caret = max(0, min(len([]rune(s.Input)), caret))
 	if selectText {
-		if s.SelectionAnchor < 0 { s.SelectionAnchor = s.Caret }
-	} else { s.SelectionAnchor = -1 }
+		if s.SelectionAnchor < 0 {
+			s.SelectionAnchor = s.Caret
+		}
+	} else {
+		s.SelectionAnchor = -1
+	}
 	s.Caret = caret
 }
 func (s *State) Insert(r rune) {
@@ -888,36 +904,54 @@ func (s *State) Insert(r rune) {
 	s.Input, s.Caret, s.SelectionAnchor = string(text), s.Caret+1, -1
 }
 func (s *State) InsertText(text string) {
-	if text == "" { return }
-	s.recordEdit(); s.deleteSelection()
-	r := []rune(s.Input); added := []rune(text)
+	if text == "" {
+		return
+	}
+	s.recordEdit()
+	s.deleteSelection()
+	r := []rune(s.Input)
+	added := []rune(text)
 	r = append(r[:s.Caret], append(added, r[s.Caret:]...)...)
 	s.Input, s.Caret, s.SelectionAnchor = string(r), s.Caret+len(added), -1
 }
 func (s *State) Backspace() {
 	s.recordEdit()
-	if s.deleteSelection() { return }
+	if s.deleteSelection() {
+		return
+	}
 	r := []rune(s.Input)
-	if s.Caret > 0 && s.Caret <= len(r) { s.Input, s.Caret = string(append(r[:s.Caret-1], r[s.Caret:]...)), s.Caret-1 }
+	if s.Caret > 0 && s.Caret <= len(r) {
+		s.Input, s.Caret = string(append(r[:s.Caret-1], r[s.Caret:]...)), s.Caret-1
+	}
 }
 func (s *State) DeleteForward() {
 	s.recordEdit()
-	if s.deleteSelection() { return }
+	if s.deleteSelection() {
+		return
+	}
 	r := []rune(s.Input)
-	if s.Caret >= 0 && s.Caret < len(r) { s.Input = string(append(r[:s.Caret], r[s.Caret+1:]...)) }
+	if s.Caret >= 0 && s.Caret < len(r) {
+		s.Input = string(append(r[:s.Caret], r[s.Caret+1:]...))
+	}
 }
-func (s *State) Cursor(delta int) { s.moveCaret(s.Caret+delta, false) }
+func (s *State) Cursor(delta int)       { s.moveCaret(s.Caret+delta, false) }
 func (s *State) CursorSelect(delta int) { s.moveCaret(s.Caret+delta, true) }
 func (s *State) UndoEdit() {
-	if len(s.editUndo) == 0 { return }
+	if len(s.editUndo) == 0 {
+		return
+	}
 	s.editRedo = append(s.editRedo, editorSnapshot{s.Input, s.Caret, s.SelectionAnchor})
-	v := s.editUndo[len(s.editUndo)-1]; s.editUndo = s.editUndo[:len(s.editUndo)-1]
+	v := s.editUndo[len(s.editUndo)-1]
+	s.editUndo = s.editUndo[:len(s.editUndo)-1]
 	s.Input, s.Caret, s.SelectionAnchor = v.input, v.caret, v.anchor
 }
 func (s *State) RedoEdit() {
-	if len(s.editRedo) == 0 { return }
+	if len(s.editRedo) == 0 {
+		return
+	}
 	s.editUndo = append(s.editUndo, editorSnapshot{s.Input, s.Caret, s.SelectionAnchor})
-	v := s.editRedo[len(s.editRedo)-1]; s.editRedo = s.editRedo[:len(s.editRedo)-1]
+	v := s.editRedo[len(s.editRedo)-1]
+	s.editRedo = s.editRedo[:len(s.editRedo)-1]
 	s.Input, s.Caret, s.SelectionAnchor = v.input, v.caret, v.anchor
 }
 
@@ -974,7 +1008,9 @@ func (s *State) CursorLineBoundary(end bool) {
 
 func (s *State) CursorSelectLine(direction int) {
 	anchor := s.SelectionAnchor
-	if anchor < 0 { anchor = s.Caret }
+	if anchor < 0 {
+		anchor = s.Caret
+	}
 	s.CursorLine(direction)
 	s.SelectionAnchor = anchor
 }
@@ -986,32 +1022,46 @@ func (s *State) CursorBlankLine(direction int, selectText bool) {
 	r := []rune(s.Input)
 	starts := []int{0}
 	for i, char := range r {
-		if char == '\n' { starts = append(starts, i+1) }
+		if char == '\n' {
+			starts = append(starts, i+1)
+		}
 	}
 	current := 0
 	for i, start := range starts {
-		if start > s.Caret { break }
+		if start > s.Caret {
+			break
+		}
 		current = i
 	}
 	if selectText {
-		if s.SelectionAnchor < 0 { s.SelectionAnchor = s.Caret }
+		if s.SelectionAnchor < 0 {
+			s.SelectionAnchor = s.Caret
+		}
 	} else {
 		s.SelectionAnchor = -1
 	}
 	blank := func(i int) bool {
 		end := len(r)
-		if i+1 < len(starts) { end = starts[i+1] - 1 }
+		if i+1 < len(starts) {
+			end = starts[i+1] - 1
+		}
 		return starts[i] == end
 	}
 	if direction < 0 {
 		for i := current - 1; i >= 0; i-- {
-			if blank(i) { s.Caret = starts[i]; return }
+			if blank(i) {
+				s.Caret = starts[i]
+				return
+			}
 		}
 		s.Caret = 0
 		return
 	}
 	for i := current + 1; i < len(starts); i++ {
-		if blank(i) { s.Caret = starts[i]; return }
+		if blank(i) {
+			s.Caret = starts[i]
+			return
+		}
 	}
 	s.Caret = len(r)
 }
@@ -1047,7 +1097,9 @@ func (s *State) WordCursor(direction int) {
 }
 func (s *State) DeleteWord(direction int) {
 	s.recordEdit()
-	if s.deleteSelection() { return }
+	if s.deleteSelection() {
+		return
+	}
 	rs := []rune(s.Input)
 	start := max(0, min(len(rs), s.Caret))
 	end := WordBoundary(s.Input, start, direction)

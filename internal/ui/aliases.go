@@ -19,8 +19,7 @@ func normalizedBindingKey(name string) string {
 	switch name {
 	case "esc":
 		return "escape"
-	case "ctrl+j":
-		return "ctrl+enter"
+
 	}
 	return name
 }
@@ -94,10 +93,10 @@ func configuredSubmitAction(action string) bool {
 func (a *App) bindAliases(g *gocui.Gui) error {
 	native := map[string]bool{
 		"up": true, "down": true, "left": true, "right": true,
-		"enter": true, "escape": true, "esc": true, "backspace": true,
+		"enter": true, "ctrl+j": true, "escape": true, "esc": true, "backspace": true,
 		"delete": true, "home": true, "end": true, "tab": true,
 		"ctrl+q": true, "ctrl+s": true, "ctrl+p": true, "ctrl+d": true,
-		"ctrl+r": true, "ctrl+b": true, "ctrl+j": true, "ctrl+enter": true, "ctrl+w": true,
+		"ctrl+r": true, "ctrl+b": true, "ctrl+w": true,
 		"ctrl+z": true, "ctrl+y": true, "ctrl+c": true, "ctrl+v": true,
 	}
 	for name := range a.configuredBindings() {
@@ -407,8 +406,7 @@ func parseKey(s string) (interface{}, bool) {
 		return gocui.KeyCtrlR, true
 	case "ctrl+b":
 		return gocui.KeyCtrlB, true
-	case "ctrl+j", "ctrl+enter":
-		return gocui.KeyCtrlJ, true
+
 	}
 	if utf8.RuneCountInString(s) == 1 {
 		r, _ := utf8.DecodeRuneInString(s)

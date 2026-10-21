@@ -1120,6 +1120,13 @@ func (a *App) createRender(c *Canvas) {
 			return "item"
 		}()
 	}(), CBBlue, CDefault)
+	if isCreationNameMode(s.Mode) {
+		counter, color, show := inputLengthCounter(s.Input, s.InputEncryptedLimit)
+		counterWidth := utf8.RuneCountInString(counter)
+		if show && w >= counterWidth+20 {
+			c.Text(x+w-counterWidth-2, y+1, counter, color, CDefault)
+		}
+	}
 	if s.Mode == DialogCreate || s.Mode == DialogFieldType || s.Mode == DialogWebsite ||
 		s.Mode == DialogLinkedChoice || s.Mode == DialogFoldersChoice ||
 		s.Mode == DialogCardBrand || s.Mode == DialogIdentityTitle {

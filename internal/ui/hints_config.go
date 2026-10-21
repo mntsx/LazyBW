@@ -219,7 +219,7 @@ func configuredHintAction(section, label string) string {
 			return "reveal_password"
 		}
 		return "reveal"
-	case "ctrl+ENTER newline":
+	case "ctrl+J newline":
 		return "newline"
 	case "ctrl+w wrap", "ctrl+w unwrap":
 		return "wrap"

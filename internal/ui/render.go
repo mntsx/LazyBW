@@ -546,6 +546,7 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 	var glyphs []string
 	folderMarkers := map[int]vault.Kind{}
 	deletedFolderRows := map[int]bool{}
+	overlongChanges := map[int]bool{}
 	selected := 0
 	applied := -1
 	switch pane {
@@ -583,8 +584,15 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 		selected = s.Filters[2]
 		applied = s.FilterFolder
 	case PaneChanges:
-		for _, v := range s.ChangesList() {
+		for index, v := range s.ChangesList() {
 			opts = append(opts, v.Name)
+			raw := v.After
+			if raw == nil {
+				raw = v.Before
+			}
+			if v.Entity == "item" && raw != nil {
+				overlongChanges[index] = (&vault.Item{Raw: raw, Cipher: s.CLI.Cipher}).HasOverlongField()
+			}
 			if v.Entity == "folder" {
 				glyphs = append(glyphs, a.icon("items", "folder"))
 			} else {
@@ -646,7 +654,15 @@ func (a *App) sidePanel(c *Canvas, name, icon string, pane Pane, x, y, w, h int)
 		if pane == PaneChanges && s.ImportedChangeAt(i) || deletedFolderRows[i] {
 			fg = CBBlack
 		}
-		c.Text(labelX, yy, minWidth(opts[i], max(0, labelLimit-labelX)), fg, bg)
+		labelWidth := max(0, labelLimit-labelX)
+		if pane == PaneChanges && overlongChanges[i] {
+			labelWidth = max(0, labelWidth-2)
+		}
+		label := minWidth(opts[i], labelWidth)
+		c.Text(labelX, yy, label, fg, bg)
+		if pane == PaneChanges && overlongChanges[i] {
+			c.Text(labelX+utf8.RuneCountInString(label)+1, yy, "!", CRed, bg)
+		}
 		if keyboard {
 			c.Text(countX, yy, count, CBBlack, bg)
 		}
@@ -767,13 +783,25 @@ func (a *App) itemsPanel(c *Canvas, x, y, w, h int) {
 		if ownerX < x+12 {
 			nameWidth = max(1, w-(nameX-x)-11)
 		}
-		visibleName := minWidth(name, nameWidth)
-		if it.Favorite() && nameWidth >= 3 {
-			visibleName = minWidth(name, nameWidth-2)
-			c.TextBold(nameX+utf8.RuneCountInString(visibleName)+1, nameY,
-				a.S.Config.FavouriteIcon("items"), CBYellow, bg)
+		overlong := it.HasOverlongField()
+		favourite := it.Favorite() && nameWidth >= 3
+		suffixWidth := 0
+		if overlong {
+			suffixWidth += 2 // space and warning marker
 		}
+		if favourite {
+			suffixWidth += 2 // space and favourite icon
+		}
+		visibleName := minWidth(name, max(1, nameWidth-suffixWidth))
 		c.TextBold(nameX, nameY, visibleName, fg, bg)
+		suffixX := nameX + utf8.RuneCountInString(visibleName) + 1
+		if overlong {
+			c.Text(suffixX, nameY, "!", CRed, bg)
+			suffixX += 2
+		}
+		if favourite {
+			c.TextBold(suffixX, nameY, a.S.Config.FavouriteIcon("items"), CBYellow, bg)
+		}
 		if s.Search != "" {
 			ok, indices, _ := vault.FuzzyMatch(name, s.Search)
 			if ok {
@@ -968,7 +996,13 @@ func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 		lastRow, lastHeight = yy, rowHeight
 		labelY, valueY := yy+1, yy+2
 		nameWidth := max(0, w-18)
-		c.TextBold(x+3, labelY, minWidth(f.Name, nameWidth), CWhite, bg)
+		label := minWidth(f.Name, nameWidth)
+		c.TextBold(x+3, labelY, label, CWhite, bg)
+		markerX := x + 4 + utf8.RuneCountInString(label)
+		if f.ExceedsUTF8Limit(s.CLI.Cipher) && markerX < x+w-9 {
+			c.Text(markerX, labelY, "!", CRed, bg)
+			markerX += 2
+		}
 		if f.Websites || f.Folders {
 			for k, website := range f.Values {
 				if k >= rowHeight-2 {
@@ -1003,12 +1037,8 @@ func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 		if k := s.FieldStatus(f); k != "" {
 			c.Text(x+w-9, labelY, string(k), stageKindColor(k), bg)
 		}
-		if s.GroundFieldChanged(s.SelectedID, f.Path) {
-			label := minWidth(f.Name, nameWidth)
-			markerX := x + 4 + utf8.RuneCountInString(label)
-			if markerX < x+w-9 {
-				c.Text(markerX, labelY, "↓", CGreen, bg)
-			}
+		if s.GroundFieldChanged(s.SelectedID, f.Path) && markerX < x+w-9 {
+			c.Text(markerX, labelY, "↓", CGreen, bg)
 		}
 		if idx == s.FieldIndex && s.Focus == PaneContent {
 			counter := fmt.Sprintf("%d/%d", idx+1, len(s.Fields))
@@ -1020,6 +1050,21 @@ func (a *App) contentPanel(c *Canvas, x, y, w, h int) {
 			previousBG, CDefault, previousStripe, -1)
 	}
 }
+
+// inputLengthCounter formats the editor's byte-based guidance and reports the
+// appropriate themed color. A zero encrypted limit identifies a non-text editor.
+func inputLengthCounter(value string, encryptedLimit int) (string, int, bool) {
+	maximum := vault.PlaintextByteLimit(encryptedLimit)
+	if maximum == 0 {
+		return "", CDefault, false
+	}
+	color := CBBlack
+	if len(value) > maximum {
+		color = CRed
+	}
+	return fmt.Sprintf("UTF-8 bytes %d/%d", len(value), maximum), color, true
+}
+
 func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 	s := a.S
 	if s.Mode != Edit {
@@ -1037,7 +1082,19 @@ func (a *App) detailPanel(c *Canvas, x, y, w, h int) {
 			name = f.Name
 		}
 	}
+	counter, counterColor, showCounter := inputLengthCounter(s.Input, s.InputEncryptedLimit)
+	counterWidth := utf8.RuneCountInString(counter)
+	if showCounter && w >= counterWidth+14 {
+		// Reserve the title-bar's right edge for the counter rather than drawing
+		// over a long field name.
+		name = minWidth(name, max(0, w-counterWidth-8))
+	} else {
+		showCounter = false
+	}
 	a.header(c, x, y, w, name, a.icon("contents", "edit"), PaneDetail)
+	if showCounter {
+		c.Text(x+w-counterWidth-1, y, counter, counterColor, CTitle)
+	}
 	c.Line(x, y+1, w, '━', panelRuleColor(s.Focus == PaneDetail), CDefault)
 	c.Fill(x, y+2, w, h-2, ' ', CWhite, CBlack)
 	value := s.Input
@@ -1125,7 +1182,9 @@ func (a *App) footer(c *Canvas, x, y, w int) {
 		page := append([]string(nil), pages[s.HintPage%len(pages)]...)
 		if a.textEntryActive() {
 			for i, hint := range page {
-				if hint == "? ..." { page[i] = "ctrl+n ..." }
+				if hint == "? ..." {
+					page[i] = "ctrl+n ..."
+				}
 			}
 		}
 		startX := x
@@ -1316,7 +1375,7 @@ func (a *App) baseHints() []string {
 		} else {
 			h = append(h, "ctrl+w wrap")
 		}
-		h = append(h, "ctrl+ENTER newline", "ctrl+z undo", "ctrl+y redo", "ctrl+c copy", "ctrl+v paste")
+		h = append(h, "ctrl+J newline", "ctrl+z undo", "ctrl+y redo", "ctrl+c copy", "ctrl+v paste")
 		if s.InputSecret {
 			h = append(h, "ctrl+r reveal")
 		}

@@ -28,12 +28,12 @@ type Network struct {
 	EUPingURL string `json:"eu_ping_url"`
 }
 type Icons struct {
-	Enabled         bool                         `json:"enabled"`
-	Authentication  map[string]string            `json:"authentication"`
-	Layout          map[string]string            `json:"layout"`
-	Items           map[string]string            `json:"items"`
-	Contents        map[string]string            `json:"contents"`
-	Dialogs         map[string]string            `json:"dialogs"`
+	Enabled        bool              `json:"enabled"`
+	Authentication map[string]string `json:"authentication"`
+	Layout         map[string]string `json:"layout"`
+	Items          map[string]string `json:"items"`
+	Contents       map[string]string `json:"contents"`
+	Dialogs        map[string]string `json:"dialogs"`
 }
 
 type Visual struct {
@@ -42,14 +42,14 @@ type Visual struct {
 }
 
 type Config struct {
-	Authentication Authentication                 `json:"authentication"`
-	Local          Local                          `json:"local_replication"`
-	Network        Network                        `json:"network"`
-	Visual         Visual                         `json:"visual"`
+	Authentication Authentication `json:"authentication"`
+	Local          Local          `json:"local_replication"`
+	Network        Network        `json:"network"`
+	Visual         Visual         `json:"visual"`
 	// Colors is retained for callers while the on-disk setting lives in visual.colors.
-	Colors         map[string]string              `json:"-"`
-	Keybinds       map[string]map[string][]string `json:"-"`
-	Directory      string                         `json:"-"`
+	Colors    map[string]string              `json:"-"`
+	Keybinds  map[string]map[string][]string `json:"-"`
+	Directory string                         `json:"-"`
 }
 
 // Icon returns a configured icon. Disabled icons are rendered as empty text.
@@ -198,7 +198,7 @@ var DefaultKeybinds = map[string]map[string][]string{
 	},
 	"detail": {
 		"back": {"escape"}, "save": {"enter"},
-		"newline": {"ctrl+enter"}, "reveal": {"ctrl+r"},
+		"newline": {"ctrl+j"}, "reveal": {"ctrl+r"},
 		"wrap": {"ctrl+w"}, "undo": {"ctrl+z"}, "redo": {"ctrl+y"},
 		"copy": {"ctrl+c"}, "paste": {"ctrl+v"},
 	},
@@ -481,10 +481,10 @@ func Load(dir string) (Config, error) {
 	}
 	settingsPath := preferred(dir, "settings")
 	settingsDefaults := map[string]any{
-		"authentication":     map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
+		"authentication":    map[string]any{"client_env_path": nil, "default_server": "us", "backend_mode": []string{"bw serve", "bw"}},
 		"local_replication": map[string]any{"save_vault": false, "vault_path": "$HOME/.local/share/lazybw/bw-vault", "vault_encryption": "aes-256-gcm"},
-		"network":            map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
-		"visual":             Visual{Icons: DefaultIcons, Colors: DefaultColors},
+		"network":           map[string]string{"us_ping_url": "https://api.bitwarden.com", "eu_ping_url": "https://api.bitwarden.eu"},
+		"visual":            Visual{Icons: DefaultIcons, Colors: DefaultColors},
 	}
 	// Complete legacy colors only when that former root object already exists.
 	if existing, readErr := os.ReadFile(settingsPath); readErr == nil {
@@ -592,6 +592,12 @@ func Load(dir string) (Config, error) {
 				bindings, err := decodeBindings(value)
 				if err != nil {
 					return Config{}, fmt.Errorf("keybinds.%s.%s: %w", section, action, err)
+				}
+				// Enter modifiers are indistinguishable in many terminals. Upgrade
+				// either previous default without altering other custom bindings.
+				if section == "detail" && action == "newline" && len(bindings) == 1 &&
+					(bindings[0] == "ctrl+enter" || bindings[0] == "shift+enter") {
+					bindings = []string{"ctrl+j"}
 				}
 				c.Keybinds[section][action] = bindings
 			}

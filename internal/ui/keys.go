@@ -27,27 +27,28 @@ func (a *App) bind(g *gocui.Gui) error {
 	bindings := []struct {
 		key      interface{}
 		name     string
+		modifier gocui.Modifier
 		fallback func() error
 	}{
-		{gocui.KeyArrowUp, "up", textOnly(func() error { return a.arrow(-1, 0) })},
-		{gocui.KeyArrowDown, "down", textOnly(func() error { return a.arrow(1, 0) })},
-		{gocui.KeyArrowLeft, "left", textOnly(func() error { return a.arrow(0, -1) })},
-		{gocui.KeyArrowRight, "right", textOnly(func() error { return a.arrow(0, 1) })},
-		{gocui.KeyCtrlW, "ctrl+w", func() error { return a.wordEdit(-1, true) }},
-		{gocui.KeyEnter, "enter", nil},
-		{gocui.KeyCtrlJ, "ctrl+enter", nil},
-		{gocui.KeyEsc, "escape", nil},
-		{gocui.KeyBackspace2, "backspace", func() error { return a.terminalBackspace(gocui.KeyBackspace2) }},
-		{gocui.KeyBackspace, "backspace", func() error { return a.terminalBackspace(gocui.KeyBackspace) }},
-		{gocui.KeyTab, "tab", func() error { return nil }},
-		{gocui.KeyDelete, "delete", a.deleteForward},
-		{gocui.KeyHome, "home", func() error {
+		{gocui.KeyArrowUp, "up", gocui.ModNone, textOnly(func() error { return a.arrow(-1, 0) })},
+		{gocui.KeyArrowDown, "down", gocui.ModNone, textOnly(func() error { return a.arrow(1, 0) })},
+		{gocui.KeyArrowLeft, "left", gocui.ModNone, textOnly(func() error { return a.arrow(0, -1) })},
+		{gocui.KeyArrowRight, "right", gocui.ModNone, textOnly(func() error { return a.arrow(0, 1) })},
+		{gocui.KeyCtrlW, "ctrl+w", gocui.ModNone, func() error { return a.wordEdit(-1, true) }},
+		{gocui.KeyEnter, "enter", gocui.ModNone, nil},
+		{gocui.KeyCtrlJ, "ctrl+j", gocui.ModNone, nil},
+		{gocui.KeyEsc, "escape", gocui.ModNone, nil},
+		{gocui.KeyBackspace2, "backspace", gocui.ModNone, func() error { return a.terminalBackspace(gocui.KeyBackspace2) }},
+		{gocui.KeyBackspace, "backspace", gocui.ModNone, func() error { return a.terminalBackspace(gocui.KeyBackspace) }},
+		{gocui.KeyTab, "tab", gocui.ModNone, func() error { return nil }},
+		{gocui.KeyDelete, "delete", gocui.ModNone, a.deleteForward},
+		{gocui.KeyHome, "home", gocui.ModNone, func() error {
 			if !a.modalOpen() {
 				a.S.Caret = 0
 			}
 			return nil
 		}},
-		{gocui.KeyEnd, "end", func() error {
+		{gocui.KeyEnd, "end", gocui.ModNone, func() error {
 			if !a.modalOpen() {
 				if a.S.Screen != Workspace && a.S.AuthFocus < 2 {
 					a.S.Caret = utf8.RuneCountInString(a.authValue())
@@ -57,21 +58,21 @@ func (a *App) bind(g *gocui.Gui) error {
 			}
 			return nil
 		}},
-		{gocui.KeyCtrlQ, "ctrl+q", nil},
-		{gocui.KeyCtrlS, "ctrl+s", nil},
-		{gocui.KeyCtrlP, "ctrl+p", nil},
-		{gocui.KeyCtrlD, "ctrl+d", nil},
-		{gocui.KeyCtrlR, "ctrl+r", nil},
-		{gocui.KeyCtrlB, "ctrl+b", nil},
-		{gocui.KeyCtrlZ, "ctrl+z", textOnly(func() error { if a.S.Mode == Edit { a.S.UndoEdit() }; return nil })},
-		{gocui.KeyCtrlY, "ctrl+y", textOnly(func() error { if a.S.Mode == Edit { a.S.RedoEdit() }; return nil })},
-		{gocui.KeyCtrlC, "ctrl+c", textOnly(a.copyEditorSelection)},
-		{gocui.KeyCtrlV, "ctrl+v", textOnly(a.pasteEditorText)},
-		{gocui.KeyCtrlN, "ctrl+n", textOnly(func() error { a.nextHintPage(); return nil })},
+		{gocui.KeyCtrlQ, "ctrl+q", gocui.ModNone, nil},
+		{gocui.KeyCtrlS, "ctrl+s", gocui.ModNone, nil},
+		{gocui.KeyCtrlP, "ctrl+p", gocui.ModNone, nil},
+		{gocui.KeyCtrlD, "ctrl+d", gocui.ModNone, nil},
+		{gocui.KeyCtrlR, "ctrl+r", gocui.ModNone, nil},
+		{gocui.KeyCtrlB, "ctrl+b", gocui.ModNone, nil},
+		{gocui.KeyCtrlZ, "ctrl+z", gocui.ModNone, textOnly(func() error { if a.S.Mode == Edit { a.S.UndoEdit() }; return nil })},
+		{gocui.KeyCtrlY, "ctrl+y", gocui.ModNone, textOnly(func() error { if a.S.Mode == Edit { a.S.RedoEdit() }; return nil })},
+		{gocui.KeyCtrlC, "ctrl+c", gocui.ModNone, textOnly(a.copyEditorSelection)},
+		{gocui.KeyCtrlV, "ctrl+v", gocui.ModNone, textOnly(a.pasteEditorText)},
+		{gocui.KeyCtrlN, "ctrl+n", gocui.ModNone, textOnly(func() error { a.nextHintPage(); return nil })},
 	}
 	for _, entry := range bindings {
 		spec := entry
-		if err := g.SetKeybinding("", spec.key, gocui.ModNone,
+		if err := g.SetKeybinding("", spec.key, spec.modifier,
 			func(_ *gocui.Gui, _ *gocui.View) error {
 				handled, err := a.dispatchConfiguredKey(spec.name)
 				if handled {
@@ -483,6 +484,7 @@ func (a *App) char(r rune) error {
 		switch s.Focus {
 		case PaneItems:
 			s.NewType = 0
+			s.InputEncryptedLimit = 0
 			s.FormFocus = 0
 			s.FormError = ""
 			s.Mode = DialogCreate
@@ -492,6 +494,7 @@ func (a *App) char(r rune) error {
 			}
 			s.Input = ""
 			s.Caret = 0
+			s.InputEncryptedLimit = vault.Schema().EditableTextLimits.FolderName
 			s.FormFocus = 0
 			s.FormError = ""
 			s.Mode = DialogFolder
@@ -501,6 +504,7 @@ func (a *App) char(r rune) error {
 			}
 			s.Input = ""
 			s.Caret = 0
+			s.InputEncryptedLimit = 0
 			s.CustomType = 0
 			s.FormFocus = 0
 			s.FormError = ""
@@ -1173,6 +1177,7 @@ func (a *App) enter() error {
 		s.FormError = ""
 		s.Input = ""
 		s.Caret = 0
+		s.InputEncryptedLimit = vault.Schema().EditableTextLimits.ItemName
 		return nil
 	case DialogFieldType:
 		options := fieldOptions(s.SelectedItem())
@@ -1189,6 +1194,7 @@ func (a *App) enter() error {
 		s.FormError = ""
 		s.Input = ""
 		s.Caret = 0
+		s.InputEncryptedLimit = vault.Schema().EditableTextLimits.CustomFieldName
 		return nil
 	case DialogLinkedChoice:
 		it := s.SelectedItem()

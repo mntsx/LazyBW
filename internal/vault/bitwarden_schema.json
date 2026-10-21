@@ -11,7 +11,8 @@
           "path": [
             "login",
             "username"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Password",
@@ -19,7 +20,8 @@
             "login",
             "password"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 5000
         },
         {
           "name": "TOTP",
@@ -27,7 +29,8 @@
             "login",
             "totp"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 1000
         },
         {
           "name": "Websites",
@@ -35,13 +38,15 @@
             "login",
             "uris"
           ],
-          "websites": true
+          "websites": true,
+          "encrypted_limit": 10000
         },
         {
           "name": "Notes",
           "path": [
             "notes"
-          ]
+          ],
+          "encrypted_limit": 10000
         }
       ]
     },
@@ -54,7 +59,8 @@
           "name": "Notes",
           "path": [
             "notes"
-          ]
+          ],
+          "encrypted_limit": 10000
         }
       ]
     },
@@ -68,7 +74,8 @@
           "path": [
             "card",
             "cardholderName"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Brand",
@@ -87,7 +94,8 @@
             "UnionPay",
             "RuPay",
             "Other"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Number",
@@ -95,21 +103,24 @@
             "card",
             "number"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 1000
         },
         {
           "name": "Expiry month",
           "path": [
             "card",
             "expMonth"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Expiry year",
           "path": [
             "card",
             "expYear"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Security code",
@@ -117,13 +128,15 @@
             "card",
             "code"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 1000
         },
         {
           "name": "Notes",
           "path": [
             "notes"
-          ]
+          ],
+          "encrypted_limit": 10000
         }
       ]
     },
@@ -144,42 +157,48 @@
             "Ms",
             "Mx",
             "Dr"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "First name",
           "path": [
             "identity",
             "firstName"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Middle name",
           "path": [
             "identity",
             "middleName"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Last name",
           "path": [
             "identity",
             "lastName"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Username",
           "path": [
             "identity",
             "username"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Company",
           "path": [
             "identity",
             "company"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "National Insurance number",
@@ -187,7 +206,8 @@
             "identity",
             "ssn"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 1000
         },
         {
           "name": "Passport number",
@@ -195,83 +215,95 @@
             "identity",
             "passportNumber"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 1000
         },
         {
           "name": "License number",
           "path": [
             "identity",
             "licenseNumber"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Email",
           "path": [
             "identity",
             "email"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Phone",
           "path": [
             "identity",
             "phone"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Address 1",
           "path": [
             "identity",
             "address1"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Address 2",
           "path": [
             "identity",
             "address2"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Address 3",
           "path": [
             "identity",
             "address3"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "City / town",
           "path": [
             "identity",
             "city"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "County",
           "path": [
             "identity",
             "state"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Postal code",
           "path": [
             "identity",
             "postalCode"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Country",
           "path": [
             "identity",
             "country"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Notes",
           "path": [
             "notes"
-          ]
+          ],
+          "encrypted_limit": 10000
         }
       ]
     },
@@ -286,27 +318,31 @@
             "sshKey",
             "privateKey"
           ],
-          "hidden": true
+          "hidden": true,
+          "encrypted_limit": 5000
         },
         {
           "name": "PublicKey",
           "path": [
             "sshKey",
             "publicKey"
-          ]
+          ],
+          "encrypted_limit": 5000
         },
         {
           "name": "Fingerprint",
           "path": [
             "sshKey",
             "fingerprint"
-          ]
+          ],
+          "encrypted_limit": 1000
         },
         {
           "name": "Notes",
           "path": [
             "notes"
-          ]
+          ],
+          "encrypted_limit": 10000
         }
       ]
     }
@@ -323,13 +359,15 @@
       "name": "Text",
       "id": 0,
       "icon": "󰊄",
-      "initial_value": ""
+      "initial_value": "",
+      "encrypted_limit": 5000
     },
     {
       "name": "Hidden",
       "id": 1,
       "icon": "󰟵",
-      "initial_value": ""
+      "initial_value": "",
+      "encrypted_limit": 5000
     },
     {
       "name": "Checkbox",
@@ -348,7 +386,8 @@
     "name": "Website",
     "id": -1,
     "icon": "󰖟",
-    "initial_value": ""
+    "initial_value": "",
+    "encrypted_limit": 10000
   },
   "linked_targets": [
     {
@@ -359,5 +398,12 @@
       "name": "Password",
       "id": 101
     }
-  ]
+  ],
+  "editable_text_limits": {
+    "item_name": 1000,
+    "custom_field_name": 1000,
+    "folder_name": 1000,
+    "attachment_filename": 1000,
+    "attachment_key": 1000
+  }
 }

@@ -35,7 +35,7 @@ func keyLabel(key interface{}) string {
 	case gocui.KeyCtrlR:
 		return "ctrl+r"
 	case gocui.KeyCtrlJ:
-		return "ctrl+enter"
+		return "ctrl+j"
 	case gocui.KeyCtrlW:
 		return "ctrl+w"
 	case gocui.KeyCtrlZ:
@@ -340,7 +340,7 @@ func (a *App) keyAction(key string) string {
 			return "move"
 		case "backspace", "delete", "ctrl+backspace", "ctrl+delete", "ctrl+w":
 			return "delete"
-		case "ctrl+enter":
+		case "ctrl+j":
 			return "newline"
 		}
 		if utf8.RuneCountInString(key) == 1 || key == "space" {

@@ -10,11 +10,12 @@ import (
 var schemaSource embed.FS
 
 type FieldDefinition struct {
-	Name     string   `json:"name"`
-	Path     []string `json:"path"`
-	Hidden   bool     `json:"hidden,omitempty"`
-	Websites bool     `json:"websites,omitempty"`
-	Options  []string `json:"options,omitempty"`
+	Name           string   `json:"name"`
+	Path           []string `json:"path"`
+	Hidden         bool     `json:"hidden,omitempty"`
+	Websites       bool     `json:"websites,omitempty"`
+	Options        []string `json:"options,omitempty"`
+	EncryptedLimit int      `json:"encrypted_limit,omitempty"`
 }
 
 type ItemTypeDefinition struct {
@@ -25,10 +26,21 @@ type ItemTypeDefinition struct {
 }
 
 type CustomFieldDefinition struct {
-	Name         string `json:"name"`
-	ID           int    `json:"id"`
-	Icon         string `json:"icon"`
-	InitialValue string `json:"initial_value"`
+	Name           string `json:"name"`
+	ID             int    `json:"id"`
+	Icon           string `json:"icon"`
+	InitialValue   string `json:"initial_value"`
+	EncryptedLimit int    `json:"encrypted_limit,omitempty"`
+}
+
+// EditableTextLimits describes encrypted text values that are not item
+// content fields, such as names supplied in creation dialogs.
+type EditableTextLimits struct {
+	ItemName           int `json:"item_name"`
+	CustomFieldName    int `json:"custom_field_name"`
+	FolderName         int `json:"folder_name"`
+	AttachmentFilename int `json:"attachment_filename"`
+	AttachmentKey      int `json:"attachment_key"`
 }
 
 type LinkedTargetDefinition struct {
@@ -37,12 +49,13 @@ type LinkedTargetDefinition struct {
 }
 
 type BitwardenSchema struct {
-	Version          int                      `json:"schema_version"`
-	ItemTypes        []ItemTypeDefinition     `json:"item_types"`
-	CreationOrder    []int                    `json:"creation_order"`
-	CustomFieldTypes []CustomFieldDefinition  `json:"custom_field_types"`
-	WebsiteField     CustomFieldDefinition    `json:"website_field"`
-	LinkedTargets    []LinkedTargetDefinition `json:"linked_targets"`
+	Version            int                      `json:"schema_version"`
+	ItemTypes          []ItemTypeDefinition     `json:"item_types"`
+	CreationOrder      []int                    `json:"creation_order"`
+	CustomFieldTypes   []CustomFieldDefinition  `json:"custom_field_types"`
+	WebsiteField       CustomFieldDefinition    `json:"website_field"`
+	LinkedTargets      []LinkedTargetDefinition `json:"linked_targets"`
+	EditableTextLimits EditableTextLimits       `json:"editable_text_limits"`
 }
 
 var schema = loadSchema()
@@ -67,7 +80,7 @@ func loadSchema() BitwardenSchema {
 		}
 		seen[typ.ID] = true
 		for _, f := range typ.Fields {
-			if f.Name == "" || len(f.Path) == 0 {
+			if f.Name == "" || len(f.Path) == 0 || f.EncryptedLimit <= 0 {
 				panic("invalid Bitwarden field")
 			}
 		}
@@ -101,6 +114,17 @@ func FieldOptions(itemType int, name string) []string {
 		}
 	}
 	return nil
+}
+
+// CustomFieldEncryptedLimit returns the type-2 encrypted character limit for
+// a custom field value. Checkbox and linked fields are not text values.
+func CustomFieldEncryptedLimit(fieldType int) int {
+	for _, definition := range schema.CustomFieldTypes {
+		if definition.ID == fieldType {
+			return definition.EncryptedLimit
+		}
+	}
+	return 0
 }
 
 func schemaTypeNames() map[int]string {
